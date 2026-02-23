@@ -1,0 +1,32 @@
+name: pip-install-bangers
+
+services:
+  backend:
+    image: pip-install-bangers-backend:local
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    gpus: all
+    volumes:
+      - bangers-data:/data
+      - bangers-models:/models
+    ports:
+      - "${BANGERS_BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    image: pip-install-bangers-frontend:local
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        NEXT_PUBLIC_BANGERS_BACKEND_PORT: ${BANGERS_BACKEND_PORT:-8000}
+    restart: unless-stopped
+    ports:
+      - "${BANGERS_FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+
+volumes:
+  bangers-data:
+  bangers-models:

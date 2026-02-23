@@ -1,0 +1,54 @@
+[tools]
+python = "3.11"
+node = "20"
+pnpm = "9.15.9"
+uv = "0.9.25"
+
+[env]
+BANGERS_DATA_DIR = "{{config_root}}/backend/data"
+BANGERS_MODEL_CACHE_DIR = "{{config_root}}/.pip-install-bangers-cache/models"
+ACESTEP_PROJECT_ROOT = "{{config_root}}/.pip-install-bangers-cache/models"
+HF_HOME = "{{config_root}}/.pip-install-bangers-cache/models/huggingface"
+HF_HUB_CACHE = "{{config_root}}/.pip-install-bangers-cache/models/huggingface/hub"
+
+[tasks.setup]
+description = "Install local dependencies and create runtime/cache directories"
+run = [
+  "mkdir -p backend/data/audio backend/data/uploads",
+  "mkdir -p .pip-install-bangers-cache/models/checkpoints .pip-install-bangers-cache/models/chat-llm .pip-install-bangers-cache/models/heartmula .pip-install-bangers-cache/models/huggingface/hub",
+  "uv --directory backend sync",
+  "pnpm --dir frontend install --frozen-lockfile",
+]
+
+[tasks.clean]
+description = "Delete local runtime data and recreate a fresh data directory"
+run = """
+set -eu
+
+data_dir="${BANGERS_DATA_DIR:-{{config_root}}/backend/data}"
+config_root="{{config_root}}"
+home_dir="${HOME:-}"
+
+case "$data_dir" in
+  ""|"/"|"$home_dir"|"$config_root"|".")
+    echo "Refusing to clean unsafe BANGERS_DATA_DIR: $data_dir" >&2
+    exit 1
+    ;;
+esac
+
+echo "Removing runtime data: $data_dir"
+rm -rf "$data_dir"
+mkdir -p "$data_dir/audio" "$data_dir/uploads"
+echo "Fresh data directory ready: $data_dir"
+"""
+
+[tasks.dev]
+description = "Run the local backend and frontend without Docker"
+run = "python start.py"
+
+[tasks.test]
+description = "Run backend and frontend tests once"
+run = [
+  "uv --directory backend run pytest -v",
+  "pnpm --dir frontend exec vitest --run",
+]
