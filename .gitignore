@@ -9,10 +9,11 @@ __pycache__/
 dist/
 build/
 .venv/
+backend/.conda/
 
 # Backend data
 backend/data/
-.pip-install-bangers-cache/
+.cache/
 
 # Node
 node_modules/

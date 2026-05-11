@@ -4,17 +4,17 @@ import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchHealth } from "@/lib/api/client";
 
-const STORAGE_KEY = "pip-install-bangers-instance-id";
+const STORAGE_KEY = "conda-install-bangers-instance-id";
 
 // localStorage keys for every persisted zustand store. Keep in sync with
 // `name:` arguments to zustand's persist middleware so a backend reset
 // also clears any client-side caches that would otherwise reference
 // rows/files that no longer exist.
 const PERSISTED_STORE_KEYS = [
-  "pip-install-bangers-settings",
-  "pip-install-bangers-player",
-  "pip-install-bangers-ambient",
-  "pip-install-bangers-sidebar",
+  "conda-install-bangers-settings",
+  "conda-install-bangers-player",
+  "conda-install-bangers-ambient",
+  "conda-install-bangers-sidebar",
 ] as const;
 
 /**

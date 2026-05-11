@@ -2,7 +2,7 @@
 
 This guide deploys conda install bangers with Docker Compose on a single NVIDIA Linux host.
 
-It mirrors `mise run dev` exactly, just containerized: backend on port 8000, frontend on port 3000, with two Docker-managed named volumes for persistent state.
+It mirrors `mise run dev` exactly, just containerized: a conda-managed backend on port 8000, frontend on port 3000, with two Docker-managed named volumes for persistent state.
 
 ## Prerequisites
 
@@ -79,20 +79,20 @@ List volumes and find their on-disk path:
 
 ```bash
 docker volume ls
-docker volume inspect pip-install-bangers_bangers-data
-docker volume inspect pip-install-bangers_bangers-models
+docker volume inspect conda-install-bangers_bangers-data
+docker volume inspect conda-install-bangers_bangers-models
 ```
 
 Back up via a throwaway container (works regardless of where Docker stores the volume):
 
 ```bash
 docker run --rm \
-  -v pip-install-bangers_bangers-data:/data \
+  -v conda-install-bangers_bangers-data:/data \
   -v "$PWD":/backup \
   alpine tar -czf /backup/bangers-data.tgz -C /data .
 
 docker run --rm \
-  -v pip-install-bangers_bangers-models:/models \
+  -v conda-install-bangers_bangers-models:/models \
   -v "$PWD":/backup \
   alpine tar -czf /backup/bangers-models.tgz -C /models .
 ```

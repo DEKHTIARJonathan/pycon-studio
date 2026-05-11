@@ -13,9 +13,9 @@ export const useSettingsStore = create<SettingsState>()(
       backendUrl: getBaseUrl(),
       setBackendUrl: (url) => {
         set({ backendUrl: url });
-        localStorage.setItem("pip-install-bangers-backend-url", url);
+        localStorage.setItem("conda-install-bangers-backend-url", url);
       },
     }),
-    { name: "pip-install-bangers-settings" },
+    { name: "conda-install-bangers-settings" },
   ),
 );

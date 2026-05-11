@@ -17,14 +17,18 @@ from urllib.error import URLError
 ROOT = Path(__file__).resolve().parent
 BACKEND_DIR = ROOT / "backend"
 FRONTEND_DIR = ROOT / "frontend"
+CONDA_ENV_DIR = BACKEND_DIR / ".conda"
+BACKEND_ENV_FILE = BACKEND_DIR / "environment.yml"
+BACKEND_PYPROJECT_FILE = BACKEND_DIR / "pyproject.toml"
+PYTORCH_CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu130"
 DEFAULT_DATA_DIR = BACKEND_DIR / "data"
-DEFAULT_MODEL_CACHE_DIR = ROOT / ".pip-install-bangers-cache" / "models"
+DEFAULT_MODEL_CACHE_DIR = ROOT / ".cache" / "models"
 
 # Self-signed cert + key shared by both Next.js and uvicorn. Generated once
 # and reused on every restart (regenerated only if missing or expired). Lives
-# under .pip-install-bangers-cache so it's gitignored alongside other runtime
+# under .cache so it's gitignored alongside other runtime
 # artifacts and survives `mise run clean`'s narrower data-dir wipe.
-CERT_DIR = ROOT / ".pip-install-bangers-cache" / "tls"
+CERT_DIR = ROOT / ".cache" / "tls"
 CERT_FILE = CERT_DIR / "dev.pem"
 KEY_FILE = CERT_DIR / "dev-key.pem"
 FRONTEND_PORT = 3000
@@ -80,17 +84,54 @@ def build_runtime_env() -> dict[str, str]:
     return env
 
 
+def _conda_executable() -> str | None:
+    conda_exe = os.environ.get("CONDA_EXE")
+    if conda_exe and Path(conda_exe).exists():
+        return conda_exe
+    return shutil.which("conda")
+
+
+def _conda_env_python() -> Path:
+    if sys.platform == "win32":
+        return CONDA_ENV_DIR / "python.exe"
+    return CONDA_ENV_DIR / "bin" / "python"
+
+
+def _conda_env_bin_dir() -> Path:
+    return CONDA_ENV_DIR / ("Scripts" if sys.platform == "win32" else "bin")
+
+
+def _conda_env_executable(name: str) -> Path:
+    bin_dir = _conda_env_bin_dir()
+    if sys.platform == "win32":
+        for suffix in (".exe", ".bat", ".cmd", ""):
+            candidate = bin_dir / f"{name}{suffix}"
+            if candidate.exists():
+                return candidate
+        return bin_dir / f"{name}.exe"
+    return bin_dir / name
+
+
+def _with_conda_env_on_path(env: dict[str, str]) -> dict[str, str]:
+    bin_dir = str(_conda_env_bin_dir())
+    return {
+        **env,
+        "CONDA_PREFIX": str(CONDA_ENV_DIR),
+        "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+    }
+
+
 def check_prerequisites() -> bool:
     ok = True
 
-    # Python version
-    if sys.version_info < (3, 11):
-        log(f"Python 3.11+ required, found {sys.version}", RED)
+    # Launcher Python version. Backend Python is supplied by conda.
+    if sys.version_info < (3, 10):
+        log(f"Python 3.10+ required to run the launcher, found {sys.version}", RED)
         ok = False
 
-    # uv
-    if not shutil.which("uv"):
-        log("'uv' not found. Install: https://docs.astral.sh/uv/getting-started/installation/", RED)
+    # conda
+    if _conda_executable() is None:
+        log("'conda' not found. Run `mise install` or install Miniforge/Miniconda.", RED)
         ok = False
 
     # Node.js
@@ -285,12 +326,12 @@ def _has_nvidia_gpu() -> bool:
 
 def _torch_has_cuda() -> bool:
     """Check if the installed torch build has CUDA support."""
-    venv_python = BACKEND_DIR / ".venv" / ("Scripts" if sys.platform == "win32" else "bin") / "python"
-    if not venv_python.exists():
+    env_python = _conda_env_python()
+    if not env_python.exists():
         return False
     try:
         result = subprocess.run(
-            [str(venv_python), "-c", "import torch; print(torch.cuda.is_available())"],
+            [str(env_python), "-c", "import torch; print(torch.cuda.is_available())"],
             capture_output=True, text=True, timeout=30,
         )
         return "True" in result.stdout
@@ -303,50 +344,90 @@ def _install_cuda_torch() -> None:
     log("NVIDIA GPU detected but torch has no CUDA support.", YELLOW)
     log("Installing PyTorch with CUDA (this may take a few minutes)...")
     _run(
-        ["uv", "pip", "install",
-         "--reinstall-package", "torch",
-         "--reinstall-package", "torchvision",
-         "--reinstall-package", "torchaudio",
+        [str(_conda_env_python()), "-m", "pip", "install",
+         "--prefer-binary",
+         "--force-reinstall",
          "torch", "torchvision", "torchaudio",
-         "--index-url", "https://download.pytorch.org/whl/cu128"],
+         "--index-url", PYTORCH_CUDA_INDEX_URL],
         cwd=BACKEND_DIR, check=True,
     )
     log("PyTorch with CUDA installed successfully.")
 
 
 def _deps_changed() -> bool:
-    """Check if lockfiles are newer than the last successful install."""
-    backend_stamp = BACKEND_DIR / ".venv" / ".deps-stamp"
+    """Check if dependency inputs are newer than the last successful install."""
+    backend_stamp = CONDA_ENV_DIR / ".deps-stamp"
     frontend_stamp = FRONTEND_DIR / "node_modules" / ".deps-stamp"
-    backend_lock = BACKEND_DIR / "uv.lock"
-    frontend_lock = FRONTEND_DIR / "pnpm-lock.yaml"
+    backend_inputs = [
+        BACKEND_ENV_FILE,
+        BACKEND_PYPROJECT_FILE,
+    ]
+    frontend_inputs = [
+        FRONTEND_DIR / "package.json",
+        FRONTEND_DIR / "pnpm-lock.yaml",
+    ]
 
-    if backend_lock.exists() and (
-        not backend_stamp.exists()
-        or backend_lock.stat().st_mtime > backend_stamp.stat().st_mtime
-    ):
+    if not _conda_env_python().exists() or not backend_stamp.exists():
         return True
 
-    if frontend_lock.exists() and (
-        not frontend_stamp.exists()
-        or frontend_lock.stat().st_mtime > frontend_stamp.stat().st_mtime
-    ):
+    for source in backend_inputs:
+        if source.exists() and source.stat().st_mtime > backend_stamp.stat().st_mtime:
+            return True
+
+    if not frontend_stamp.exists():
         return True
+
+    for source in frontend_inputs:
+        if source.exists() and source.stat().st_mtime > frontend_stamp.stat().st_mtime:
+            return True
 
     return False
 
 
 def _touch_dep_stamps() -> None:
-    """Record a successful install so we can detect future lockfile changes."""
-    backend_stamp = BACKEND_DIR / ".venv" / ".deps-stamp"
+    """Record a successful install so we can detect future dependency changes."""
+    backend_stamp = CONDA_ENV_DIR / ".deps-stamp"
     frontend_stamp = FRONTEND_DIR / "node_modules" / ".deps-stamp"
+    backend_stamp.parent.mkdir(parents=True, exist_ok=True)
+    frontend_stamp.parent.mkdir(parents=True, exist_ok=True)
     backend_stamp.touch()
     frontend_stamp.touch()
 
 
+def _ensure_conda_env() -> None:
+    """Create or update the project-local conda environment."""
+    conda = _conda_executable()
+    if conda is None:
+        raise RuntimeError("'conda' not found. Run `mise install` or install Miniforge/Miniconda.")
+    if not BACKEND_ENV_FILE.exists():
+        raise RuntimeError(f"Missing backend conda environment file: {BACKEND_ENV_FILE}")
+
+    if _conda_env_python().exists():
+        log("Updating backend conda environment...")
+        _run(
+            [conda, "env", "update", "--prefix", str(CONDA_ENV_DIR),
+             "--file", str(BACKEND_ENV_FILE), "--prune"],
+            cwd=ROOT, check=True,
+        )
+    else:
+        log("Creating backend conda environment...")
+        _run(
+            [conda, "env", "create", "--yes", "--prefix", str(CONDA_ENV_DIR),
+             "--file", str(BACKEND_ENV_FILE)],
+            cwd=ROOT, check=True,
+        )
+
+
 def install_dependencies() -> None:
+    _ensure_conda_env()
+
     log("Installing backend dependencies...")
-    _run(["uv", "sync"], cwd=BACKEND_DIR, check=True)
+    _run(
+        [str(_conda_env_python()), "-m", "pip", "install", "--prefer-binary",
+         "--extra-index-url", PYTORCH_CUDA_INDEX_URL,
+         "-e", ".[dev]"],
+        cwd=BACKEND_DIR, check=True,
+    )
 
     # On Windows/Linux with NVIDIA GPU, ensure torch has CUDA support
     if sys.platform != "darwin" and _has_nvidia_gpu() and not _torch_has_cuda():
@@ -374,16 +455,16 @@ def main() -> None:
     ensure_data_dirs()
 
     # Install deps if needed
-    if not (BACKEND_DIR / ".venv").exists() or not (FRONTEND_DIR / "node_modules").exists():
+    if args.install:
+        log("Forcing dependency install...", YELLOW)
+        install_dependencies()
+    elif not _conda_env_python().exists() or not (FRONTEND_DIR / "node_modules").exists():
         install_dependencies()
     elif _deps_changed():
         log("Dependencies changed — updating...", YELLOW)
         install_dependencies()
-    elif not args.install:
+    else:
         log("Dependencies up to date.", YELLOW)
-
-    if args.install:
-        install_dependencies()
 
     runtime_env = build_runtime_env()
     lan_ip = _detect_lan_ip()
@@ -432,11 +513,16 @@ def main() -> None:
     # we feed to Next.js below, so the frontend's cross-origin fetch to the
     # API doesn't get blocked as mixed content.
     backend_env = {
-        **runtime_env,
+        **_with_conda_env_on_path(runtime_env),
         "BANGERS_SSL_CERTFILE": str(cert_path),
         "BANGERS_SSL_KEYFILE": str(key_path),
     }
-    backend_cmd = ["uv", "run", "--no-sync", "pip-install-bangers"]
+    backend_entry = _conda_env_executable("conda-install-bangers")
+    backend_cmd = (
+        [str(backend_entry)]
+        if backend_entry.exists()
+        else [str(_conda_env_python()), "-m", "bangers.main"]
+    )
     backend = _popen(
         backend_cmd,
         cwd=BACKEND_DIR,

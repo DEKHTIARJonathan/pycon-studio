@@ -12,7 +12,7 @@ function inferBrowserBaseUrl(): string {
 
 export function getBaseUrl(): string {
   if (typeof window !== "undefined") {
-    const override = localStorage.getItem("pip-install-bangers-backend-url");
+    const override = localStorage.getItem("conda-install-bangers-backend-url");
     if (override) return override;
     if (ENV_BASE_URL) return ENV_BASE_URL;
     return inferBrowserBaseUrl();

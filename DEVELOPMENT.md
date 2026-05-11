@@ -5,6 +5,7 @@ This guide is for local development without rebuilding Docker containers.
 ## Prerequisites
 
 - [mise](https://mise.jdx.dev/) installed and activated in your shell
+- conda; `mise install` installs it from `.mise.toml`
 - Git
 - macOS, Linux, or Windows with a shell that can run the listed commands
 
@@ -13,8 +14,18 @@ The repo pins its local toolchain in `.mise.toml`:
 - Python 3.11
 - Node.js 20
 - pnpm 9
-- uv 0.9.25
+- conda, declared as `"conda:conda" = "latest"` using mise's conda backend
 - `openssl` (system package; used to mint a self-signed dev TLS cert)
+
+Mise's conda backend is experimental, so `.mise.toml` sets
+`settings.experimental = true` locally. Contributors should not need to run
+`mise settings experimental=true` globally for this repo.
+Do not change the tool entry to bare `conda = "latest"`; some mise versions
+resolve that through the normal registry and fail before the setup task can run.
+
+The backend itself is installed into a project-local conda environment at
+`backend/.conda` from `backend/environment.yml`, then Python dependencies are
+installed directly from `backend/pyproject.toml`.
 
 ## First-Time Setup
 
@@ -25,8 +36,9 @@ mise run setup
 
 `mise run setup` installs backend and frontend dependencies and creates:
 
+- `backend/.conda/` for the project-local backend Python environment
 - `backend/data/` for SQLite, generated audio, and uploads
-- `.pip-install-bangers-cache/models/` for reusable model files and Hugging Face cache data
+- `.cache/models/` for reusable model files and Hugging Face cache data
 
 Downloaded model weights live outside the Python and Node dependency folders, so reinstalling dependencies or rebuilding containers does not redownload them.
 
@@ -43,7 +55,7 @@ This removes `BANGERS_DATA_DIR` (`backend/data/` by default), then recreates fre
 The backend starts with **no models loaded**. Open the **Models** page in the
 running app and click Download / Select for the DiT (and optionally LM and chat
 LLM) you want. Your selection is persisted in
-`backend/data/pip-install-bangers.db` and auto-loaded on every restart.
+`backend/data/conda-install-bangers.db` and auto-loaded on every restart.
 
 The Models page is the only source of truth for which models are active — there
 are no baked-in defaults and no env vars that pre-pick models for you.
@@ -61,7 +73,7 @@ This runs the host-native launcher:
 - From another machine on the LAN/VPN: `https://<that-box's-hostname-or-ip>:3000`
 
 Both servers share a single self-signed cert that the launcher mints into
-`.pip-install-bangers-cache/tls/`. The cert covers `localhost`, `127.0.0.1`,
+`.cache/tls/`. The cert covers `localhost`, `127.0.0.1`,
 and the box's detected LAN IP, so you can reach the dev server from another
 device on the network without mismatched-hostname errors.
 
@@ -78,7 +90,7 @@ warn about it the first time you connect. Click through ("Advanced →
 Proceed to `<host>`") and the warning is remembered for that origin.
 
 No `sudo`, no system-wide CA install, no `mkcert`. The cert/key pair lives
-at `.pip-install-bangers-cache/tls/dev.{pem,key.pem}` and is regenerated
+at `.cache/tls/dev.{pem,key.pem}` and is regenerated
 automatically when it expires (default: 365 days) or when the LAN IP
 changes between runs.
 
@@ -100,16 +112,16 @@ Default local paths:
 
 ```bash
 BANGERS_DATA_DIR=./backend/data
-BANGERS_MODEL_CACHE_DIR=./.pip-install-bangers-cache/models
-ACESTEP_PROJECT_ROOT=./.pip-install-bangers-cache/models
-HF_HOME=./.pip-install-bangers-cache/models/huggingface
-HF_HUB_CACHE=./.pip-install-bangers-cache/models/huggingface/hub
+BANGERS_MODEL_CACHE_DIR=./.cache/models
+ACESTEP_PROJECT_ROOT=./.cache/models
+HF_HOME=./.cache/models/huggingface
+HF_HUB_CACHE=./.cache/models/huggingface/hub
 ```
 
 Use a different disk by exporting paths before setup/dev:
 
 ```bash
-export BANGERS_MODEL_CACHE_DIR=/Volumes/AI/models/pip-install-bangers
+export BANGERS_MODEL_CACHE_DIR=/Volumes/AI/models/conda-install-bangers
 export ACESTEP_PROJECT_ROOT="$BANGERS_MODEL_CACHE_DIR"
 export HF_HOME="$BANGERS_MODEL_CACHE_DIR/huggingface"
 export HF_HUB_CACHE="$HF_HOME/hub"
@@ -125,13 +137,13 @@ mise run test
 
 This runs:
 
-- backend: `uv --directory backend run pytest -v`
+- backend: `cd backend && conda run --prefix .conda pytest -v`
 - frontend: `pnpm --dir frontend exec vitest --run`
 
 You can run each side manually:
 
 ```bash
-uv --directory backend run pytest -v
+cd backend && conda run --prefix .conda pytest -v
 pnpm --dir frontend exec vitest --run
 ```
 

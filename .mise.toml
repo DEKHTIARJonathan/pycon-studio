@@ -2,21 +2,27 @@
 python = "3.11"
 node = "20"
 pnpm = "9.15.9"
-uv = "0.9.25"
+"conda:conda" = "latest"
+
+[settings]
+# The mise conda backend is still experimental. Keep the opt-in project-local
+# so `mise install` can install conda without requiring a global user setting.
+experimental = true
 
 [env]
 BANGERS_DATA_DIR = "{{config_root}}/backend/data"
-BANGERS_MODEL_CACHE_DIR = "{{config_root}}/.pip-install-bangers-cache/models"
-ACESTEP_PROJECT_ROOT = "{{config_root}}/.pip-install-bangers-cache/models"
-HF_HOME = "{{config_root}}/.pip-install-bangers-cache/models/huggingface"
-HF_HUB_CACHE = "{{config_root}}/.pip-install-bangers-cache/models/huggingface/hub"
+BANGERS_MODEL_CACHE_DIR = "{{config_root}}/.cache/models"
+ACESTEP_PROJECT_ROOT = "{{config_root}}/.cache/models"
+HF_HOME = "{{config_root}}/.cache/models/huggingface"
+HF_HUB_CACHE = "{{config_root}}/.cache/models/huggingface/hub"
 
 [tasks.setup]
 description = "Install local dependencies and create runtime/cache directories"
 run = [
   "mkdir -p backend/data/audio backend/data/uploads",
-  "mkdir -p .pip-install-bangers-cache/models/checkpoints .pip-install-bangers-cache/models/chat-llm .pip-install-bangers-cache/models/heartmula .pip-install-bangers-cache/models/huggingface/hub",
-  "uv --directory backend sync",
+  "mkdir -p .cache/models/checkpoints .cache/models/chat-llm .cache/models/huggingface/hub",
+  "conda env create --yes --prefix backend/.conda --file backend/environment.yml || conda env update --prefix backend/.conda --file backend/environment.yml --prune",
+  "cd backend && conda run --prefix .conda python -m pip install --prefer-binary --extra-index-url https://download.pytorch.org/whl/cu130 -e '.[dev]'",
   "pnpm --dir frontend install --frozen-lockfile",
 ]
 
@@ -49,6 +55,6 @@ run = "python start.py"
 [tasks.test]
 description = "Run backend and frontend tests once"
 run = [
-  "uv --directory backend run pytest -v",
+  "cd backend && conda run --prefix .conda pytest -v",
   "pnpm --dir frontend exec vitest --run",
 ]

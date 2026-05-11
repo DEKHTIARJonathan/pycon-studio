@@ -76,14 +76,14 @@ class Settings:
         self.DATA_DIR = Path(
             _getenv("BANGERS_DATA_DIR", str(self.BASE_DIR / "data"))
         ).expanduser()
-        self.DB_PATH = self.DATA_DIR / "pip-install-bangers.db"
+        self.DB_PATH = self.DATA_DIR / "conda-install-bangers.db"
         self.AUDIO_DIR = self.DATA_DIR / "audio"
         self.UPLOADS_DIR = self.DATA_DIR / "uploads"
 
         self.MODEL_CACHE_DIR = Path(
             _getenv(
                 "BANGERS_MODEL_CACHE_DIR",
-                str(self.REPO_ROOT / ".pip-install-bangers-cache" / "models"),
+                str(self.REPO_ROOT / ".cache" / "models"),
             )
         ).expanduser()
         self.ACESTEP_PROJECT_ROOT = _getenv("ACESTEP_PROJECT_ROOT", str(self.MODEL_CACHE_DIR))

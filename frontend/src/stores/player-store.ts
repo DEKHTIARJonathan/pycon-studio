@@ -93,7 +93,7 @@ export const usePlayerStore = create<PlayerState>()(persist((set) => ({
     set((s) => ({ showFullPlayer: !s.showFullPlayer, showMiniQueue: false })),
   toggleMiniQueue: () => set((s) => ({ showMiniQueue: !s.showMiniQueue })),
 }), {
-  name: "pip-install-bangers-player",
+  name: "conda-install-bangers-player",
   // Only persist user preferences. Playback state and queue are runtime
   // concerns; rehydrating them led to stale URLs and confusing behavior
   // when the dev server restarted.

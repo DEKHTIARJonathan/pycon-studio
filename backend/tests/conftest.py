@@ -26,7 +26,7 @@ async def client(tmp_path):
     # Point all paths to tmp_path — must set DB_PATH explicitly
     data_dir = tmp_path / "data"
     settings.DATA_DIR = data_dir
-    settings.DB_PATH = data_dir / "pip-install-bangers.db"
+    settings.DB_PATH = data_dir / "conda-install-bangers.db"
     settings.AUDIO_DIR = data_dir / "audio"
     settings.UPLOADS_DIR = data_dir / "uploads"
     settings.MODEL_CACHE_DIR = tmp_path / "model-cache"

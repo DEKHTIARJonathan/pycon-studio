@@ -1,8 +1,8 @@
-name: pip-install-bangers
+name: conda-install-bangers
 
 services:
   backend:
-    image: pip-install-bangers-backend:local
+    image: conda-install-bangers-backend:local
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
@@ -15,7 +15,7 @@ services:
       - "${BANGERS_BACKEND_PORT:-8000}:8000"
 
   frontend:
-    image: pip-install-bangers-frontend:local
+    image: conda-install-bangers-frontend:local
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile

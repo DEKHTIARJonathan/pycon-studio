@@ -80,22 +80,22 @@ Built on [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5).
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Python | 3.11+ | [python.org](https://www.python.org/downloads/) |
-| uv | latest | [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) |
+| Python | 3.10+ launcher; backend uses conda Python 3.11 | [python.org](https://www.python.org/downloads/) |
+| conda | latest | `mise install`, [Miniforge](https://conda-forge.org/download/), or [Miniconda](https://docs.conda.io/projects/miniconda/) |
 | Node.js | 20+ | [nodejs.org](https://nodejs.org/) |
 | pnpm | 9+ | [pnpm.io](https://pnpm.io/installation) |
 
 ### Clone & Run
 
 ```bash
-git clone https://github.com/proximasan/pip-install-bangers.git
-cd pip-install-bangers
-python3 start.py        # macOS / Linux
-python start.py         # Windows
+git clone https://github.com/DEKHTIARJonathan/conda-install-bangers.git
+cd conda-install-bangers
+mise run setup
+mise run dev
 ```
 
 That's it. The launcher:
-- Checks prerequisites (Python, uv, Node.js, pnpm)
+- Checks prerequisites (Python, conda, Node.js, pnpm)
 - Installs dependencies automatically on first run
 - Starts the backend (port 8000) and frontend (port 3000)
 - Opens your browser automatically once ready
@@ -124,6 +124,12 @@ mise run clean
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for local workflow, cache layout, and troubleshooting.
+
+The repo enables mise's experimental conda backend in `.mise.toml` so `mise install`
+can install `conda` without a separate global `mise settings experimental=true`.
+The tool entry must use the backend-qualified form `"conda:conda" = "latest"`;
+bare `conda = "latest"` is resolved as a normal mise registry tool on some
+versions and fails with `conda not found in mise tool registry`.
 
 ### Production with Docker Compose
 
@@ -184,8 +190,9 @@ If you prefer to run things separately:
 ```bash
 # Backend
 cd backend
-uv sync
-uv run pip-install-bangers       # Starts on :8000
+conda env create --prefix .conda --file environment.yml
+conda run --prefix .conda python -m pip install --prefer-binary --extra-index-url https://download.pytorch.org/whl/cu130 -e '.[dev]'
+conda run --prefix .conda conda-install-bangers  # Starts on :8000
 
 # Frontend (separate terminal)
 cd frontend
@@ -211,8 +218,8 @@ Environment variables (all optional, sensible defaults provided):
 | `BANGERS_GUIDANCE_SCALE` | `7.0` | Default DiT guidance scale |
 | `BANGERS_THINKING` | `true` | Default 5Hz LM thinking mode |
 | `BANGERS_DATA_DIR` | `backend/data` | Runtime data directory for DB, audio, uploads, and datasets |
-| `BANGERS_MODEL_CACHE_DIR` | `.pip-install-bangers-cache/models` | Persistent model/cache directory |
-| `ACESTEP_PROJECT_ROOT` | `.pip-install-bangers-cache/models` | Root model directory for checkpoints and chat LLMs |
+| `BANGERS_MODEL_CACHE_DIR` | `.cache/models` | Persistent model/cache directory |
+| `ACESTEP_PROJECT_ROOT` | `.cache/models` | Root model directory for checkpoints and chat LLMs |
 
 ## Keyboard Shortcuts
 
@@ -229,7 +236,7 @@ Environment variables (all optional, sensible defaults provided):
 ## Project Structure
 
 ```
-pip-install-bangers/
+conda-install-bangers/
 ├── start.py                  # One-command launcher
 ├── compose.yaml              # Production Docker Compose stack
 ├── docker/                   # Backend and frontend Dockerfiles
@@ -254,7 +261,7 @@ pip-install-bangers/
 │   │   ├── audio/            # Generated music files
 │   │   └── uploads/          # Uploaded source audio
 │   └── tests/                # pytest + httpx
-├── .pip-install-bangers-cache/models/    # Persistent model cache (gitignored)
+├── .cache/models/    # Persistent model cache (gitignored)
 │   ├── checkpoints/          # ACE-Step model weights
 │   ├── chat-llm/             # Local chat LLM weights
 ├── frontend/                 # TypeScript — Next.js + React 19
@@ -316,7 +323,7 @@ Or run each side directly:
 
 ```bash
 # Backend
-cd backend && uv run pytest -v
+cd backend && conda run --prefix .conda pytest -v
 
 # Frontend
 cd frontend && pnpm exec vitest --run

@@ -21,6 +21,6 @@ export const useAmbientStore = create<AmbientState>()(
       setEffect: (effect) => set({ effect }),
       setVolume: (volume) => set({ volume }),
     }),
-    { name: "pip-install-bangers-ambient" },
+    { name: "conda-install-bangers-ambient" },
   ),
 );

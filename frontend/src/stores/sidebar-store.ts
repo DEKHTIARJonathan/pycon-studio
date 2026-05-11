@@ -21,7 +21,7 @@ export const useSidebarStore = create<SidebarState>()(
       setMobileOpen: (open) => set({ mobileOpen: open }),
     }),
     {
-      name: "pip-install-bangers-sidebar",
+      name: "conda-install-bangers-sidebar",
       partialize: (state) => ({ collapsed: state.collapsed }),
     },
   ),

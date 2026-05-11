@@ -67,7 +67,7 @@ export function MiniPlayer() {
     <>
       <audio
         ref={audioRef}
-        data-pip-install-bangers-player="true"
+        data-conda-install-bangers-player="true"
         className="hidden"
       />
       {currentSong && (

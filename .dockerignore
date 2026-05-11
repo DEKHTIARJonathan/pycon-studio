@@ -8,6 +8,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 backend/.venv/
+backend/.conda/
 backend/dist/
 backend/build/
 backend/*.egg-info/
@@ -20,7 +21,7 @@ frontend/.turbo/
 
 # Runtime data and model caches
 backend/data/
-.pip-install-bangers-cache/
+.cache/
 
 # Local env and logs
 .env

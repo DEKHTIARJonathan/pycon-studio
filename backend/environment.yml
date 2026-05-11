@@ -1,0 +1,15 @@
+name: conda-install-bangers
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - git
+  - ffmpeg
+  - libsndfile
+  - openssl
+  - ca-certificates
+  - certifi
+  - setuptools
+  - wheel
+  - hatchling
