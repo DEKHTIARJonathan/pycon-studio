@@ -78,20 +78,20 @@ CHAT_LLM_MODELS: tuple[DownloadableModel, ...] = (
         format="MLX",
         quantization="4bit",
     ),
-    # ========================= [Transformers] Qwen3 small models ========================= #
-    # Small Transformers-runtime models for tight VRAM budgets (e.g. when the
-    # ACE-Step already holds a large model resident on the same GPU).
-    # These are plain BF16 checkpoints - no quantization, no trust_remote_code.
-    # ========================= [Transformers] NVIDIA Nemotron models ========================= #
-    _chat_model(
-        name="NVIDIA-Nemotron-3-Nano-4B-FP8",
-        repo_id="nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8",
-        size_mb=5_280,
-        description="NVIDIA Nemotron 3 Nano 4B FP8 for Transformers/vLLM. ~5.3 GB.",
-        compatible_runtimes=(),
-        format="Transformers",
-        quantization="FP8",
-    ),
+    # # ========================= [Transformers] Qwen3 small models ========================= #
+    # # Small Transformers-runtime models for tight VRAM budgets (e.g. when the
+    # # ACE-Step already holds a large model resident on the same GPU).
+    # # These are plain BF16 checkpoints - no quantization, no trust_remote_code.
+    # # ========================= [Transformers] NVIDIA Nemotron models ========================= #
+    # _chat_model(
+    #     name="NVIDIA-Nemotron-3-Nano-4B-FP8",
+    #     repo_id="nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8",
+    #     size_mb=5_280,
+    #     description="NVIDIA Nemotron 3 Nano 4B FP8 for Transformers/vLLM. ~5.3 GB.",
+    #     compatible_runtimes=(),
+    #     format="Transformers",
+    #     quantization="FP8",
+    # ),
     # ========================= [Transformers] Qwen3 models ========================= #
     _chat_model(
         name="Qwen3-1.7B",
@@ -111,55 +111,82 @@ CHAT_LLM_MODELS: tuple[DownloadableModel, ...] = (
         format="Transformers",
         quantization="BF16",
     ),
-    # ========================= [Transformers] Qwen3.5 models ========================= #
     _chat_model(
-        name="Qwen3.5-9B",
-        repo_id="Qwen/Qwen3.5-9B",
-        size_mb=19_300,
-        description="Qwen3.5 9B for Transformers/vLLM. ~19.3 GB.",
+        name="Qwen3-8B-FP8",
+        repo_id="Qwen/Qwen3-8B-FP8",
+        size_mb=9_450,
+        description="Qwen3 8B FP8 for Transformers. ~9.45 GB VRAM. Stronger small option.",
         compatible_runtimes=(),
         format="Transformers",
-        quantization="",
-    ),
-    # ========================= [Transformers] Qwen3.6 models ========================= #
-    _chat_model(
-        name="Qwen3.6-27B-FP8",
-        repo_id="Qwen/Qwen3.6-27B-FP8",
-        size_mb=30_900,
-        description="Qwen3.6 27B FP8 for Transformers/vLLM. ~30.9 GB.",
-        compatible_runtimes=(),
-        format="Transformers FP8",
         quantization="FP8",
     ),
     _chat_model(
-        name="Qwen3.6-35B-A3B-FP8",
-        repo_id="Qwen/Qwen3.6-35B-A3B-FP8",
-        size_mb=37_500,
-        description="Qwen3.6 35B A3B FP8 for Transformers/vLLM. ~37.5 GB.",
-        compatible_runtimes=(),
-        format="Transformers FP8",
-        quantization="FP8",
-    ),
-    _chat_model(
-        name="Qwen3.6-35B-A3B",
-        repo_id="Qwen/Qwen3.6-35B-A3B",
-        size_mb=71_900,
-        description="Qwen3.6 35B A3B for Transformers/vLLM. ~71.9 GB.",
+        name="Qwen3-14B-FP8",
+        repo_id="Qwen/Qwen3-14B-FP8",
+        size_mb=16_300,
+        description="Qwen3 14B FP8 for Transformers. ~16.3 GB VRAM. Stronger small option.",
         compatible_runtimes=(),
         format="Transformers",
-        quantization="BF16",
-    ),
-    # ========================= [Transformers] Nemotron models ========================= #
-    _chat_model(
-        name="Llama-3_3-Nemotron-Super-49B-v1_5-FP8",
-        repo_id="nvidia/Llama-3_3-Nemotron-Super-49B-v1_5-FP8",
-        size_mb=52_000,
-        description="NVIDIA Nemotron Super 49B v1.5 FP8 for Transformers/vLLM. ~52 GB.",
-        compatible_runtimes=(),
-        format="Transformers FP8",
         quantization="FP8",
-        trust_remote_code=True,
     ),
+    _chat_model(
+        name="Qwen3-30B-A3B-Instruct-2507-FP8",
+        repo_id="Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+        size_mb=31_200,
+        description="Qwen3 30B A3B Instruct 2507 FP8 for Transformers. ~31.2 GB VRAM. Stronger small option.",
+        compatible_runtimes=(),
+        format="Transformers",
+        quantization="FP8",
+    ),
+    # # ========================= [Transformers] Qwen3.5 models ========================= #
+    # _chat_model(
+    #     name="Qwen3.5-9B",
+    #     repo_id="Qwen/Qwen3.5-9B",
+    #     size_mb=19_300,
+    #     description="Qwen3.5 9B for Transformers/vLLM. ~19.3 GB.",
+    #     compatible_runtimes=(),
+    #     format="Transformers",
+    #     quantization="",
+    # ),
+    # # ========================= [Transformers] Qwen3.6 models ========================= #
+    # _chat_model(
+    #     name="Qwen3.6-27B-FP8",
+    #     repo_id="Qwen/Qwen3.6-27B-FP8",
+    #     size_mb=30_900,
+    #     description="Qwen3.6 27B FP8 for Transformers/vLLM. ~30.9 GB.",
+    #     compatible_runtimes=(),
+    #     format="Transformers FP8",
+    #     quantization="FP8",
+    # ),
+    # _chat_model(
+    #     name="Qwen3.6-35B-A3B-FP8",
+    #     repo_id="Qwen/Qwen3.6-35B-A3B-FP8",
+    #     size_mb=37_500,
+    #     description="Qwen3.6 35B A3B FP8 for Transformers/vLLM. ~37.5 GB.",
+    #     compatible_runtimes=(),
+    #     format="Transformers FP8",
+    #     quantization="FP8",
+    # ),
+    # _chat_model(
+    #     name="Qwen3.6-35B-A3B",
+    #     repo_id="Qwen/Qwen3.6-35B-A3B",
+    #     size_mb=71_900,
+    #     description="Qwen3.6 35B A3B for Transformers/vLLM. ~71.9 GB.",
+    #     compatible_runtimes=(),
+    #     format="Transformers",
+    #     quantization="BF16",
+    # ),
+    # # ========================= [Transformers] Nemotron models ========================= #
+    # _chat_model(
+    #     name="Llama-3_3-Nemotron-Super-49B-v1_5-FP8",
+    #     repo_id="nvidia/Llama-3_3-Nemotron-Super-49B-v1_5-FP8",
+    #     size_mb=52_000,
+    #     description="NVIDIA Nemotron Super 49B v1.5 FP8 for Transformers/vLLM. ~52 GB.",
+    #     compatible_runtimes=(),
+    #     format="Transformers FP8",
+    #     quantization="FP8",
+    #     trust_remote_code=True,
+    # ),
 )
 
 @dataclass(frozen=True)
