@@ -39,6 +39,7 @@ class DJMessageResult(BaseModel):
 
 class DJInfoResponse(BaseModel):
     active_model: str = ""
+    loaded_model: str = ""
     installed_models: list[str] = Field(default_factory=list)
     system_prompt: str = ""
     default_system_prompt: str = ""

@@ -89,7 +89,7 @@ export function ModelCards({
                   </div>
                   {model.is_active ? (
                     <Button variant="outline" size="sm" className="pointer-events-none text-green-500 border-green-500/30">
-                      Selected
+                      Loaded
                       <Check className="ml-1 h-3 w-3" />
                     </Button>
                   ) : (

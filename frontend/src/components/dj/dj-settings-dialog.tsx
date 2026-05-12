@@ -90,11 +90,11 @@ export function DJSettingsDialog({ open, onOpenChange }: DJSettingsDialogProps) 
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
             <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-              <span className="text-muted-foreground">Active chat model:</span>{" "}
-              {info.active_model ? (
-                <span className="font-medium">{info.active_model}</span>
+              <span className="text-muted-foreground">Loaded chat model:</span>{" "}
+              {info.loaded_model ? (
+                <span className="font-medium">{info.loaded_model}</span>
               ) : (
-                <span className="italic text-muted-foreground">none selected</span>
+                <span className="italic text-muted-foreground">none loaded</span>
               )}
               <span className="text-muted-foreground">
                 {" "}

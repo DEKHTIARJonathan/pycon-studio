@@ -1,4 +1,59 @@
+import asyncio
+import json
+from typing import Any, Callable
+
 import pytest
+
+
+class _ReadyGenerationBackend:
+    def __init__(self) -> None:
+        self.last_generate_params: dict[str, Any] | None = None
+        self.dit_initialized = True
+        self.lm_initialized = False
+        self.lm_disabled = True
+        self.active_dit_model = "fake-dit"
+        self.active_lm_model = ""
+        self.dit_handler = None
+
+    @property
+    def is_ready(self) -> bool:
+        return True
+
+    @property
+    def device(self) -> str:
+        return "test"
+
+    @property
+    def init_stage(self) -> str:
+        return "ready"
+
+    @property
+    def init_error(self) -> str:
+        return ""
+
+    @property
+    def download_progress(self) -> float:
+        return 0.0
+
+    async def generate(
+        self,
+        params_dict: dict[str, Any],
+        progress_callback: Callable | None = None,
+    ) -> dict[str, Any]:
+        self.last_generate_params = dict(params_dict)
+        if progress_callback:
+            progress_callback(1.0, "done")
+        return {
+            "success": True,
+            "audios": [
+                {
+                    "path": "fake.flac",
+                    "key": "fake.flac",
+                    "sample_rate": 48000,
+                    "params": dict(params_dict),
+                }
+            ],
+        }
 
 
 def test_generation_cancelled_bypasses_broad_exception_handlers():
@@ -62,6 +117,92 @@ async def test_generate_dit_loading_distinct_from_no_selection(client):
 
 
 @pytest.mark.asyncio
+async def test_custom_generation_reviews_user_provided_lyrics_before_backend(client, monkeypatch):
+    from bangers.db.connection import get_db
+    from bangers.services import lyrics_pipeline
+    from bangers.services.generation import generation_service
+
+    backend = _ReadyGenerationBackend()
+    generation_service.backend = backend
+
+    async def fake_chat(*_args, **_kwargs):
+        return "<guarded_lyrics>\n[verse]\nReviewed custom lyric\n</guarded_lyrics>"
+
+    monkeypatch.setattr(lyrics_pipeline.chat_llm, "chat", fake_chat)
+
+    resp = await client.post("/api/generate", json={
+        "task_type": "text2music",
+        "caption": "custom tab vocal song",
+        "lyrics": "[verse]\nRaw custom lyric",
+        "instrumental": False,
+        "inference_steps": 1,
+    })
+
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    for _ in range(50):
+        job_resp = await client.get(f"/api/generate/{job_id}")
+        body = job_resp.json()
+        if body["status"] in {"completed", "failed"}:
+            break
+        await asyncio.sleep(0.01)
+
+    assert body["status"] == "completed", body
+    assert backend.last_generate_params is not None
+    assert backend.last_generate_params["lyrics"] == "[verse]\nReviewed custom lyric"
+
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT params_json, result_json FROM generation_history WHERE id = ?",
+        (body["history_id"],),
+    )
+    history = await cursor.fetchone()
+    params = json.loads(history["params_json"])
+    results = json.loads(history["result_json"])
+
+    assert params["lyrics"] == "[verse]\nReviewed custom lyric"
+    assert results[0]["params"]["lyrics"] == "[verse]\nReviewed custom lyric"
+    assert all(not key.startswith("_lyrics_pipeline_") for key in params)
+
+
+@pytest.mark.asyncio
+async def test_custom_generation_reports_code_of_conduct_rejected_lyrics(client, monkeypatch):
+    from bangers.services import lyrics_pipeline
+    from bangers.services.generation import generation_service
+
+    backend = _ReadyGenerationBackend()
+    generation_service.backend = backend
+
+    async def fake_chat(*_args, **_kwargs):
+        return "<lyrics_rejected>\nSevere Code of Conduct violation.\n</lyrics_rejected>"
+
+    monkeypatch.setattr(lyrics_pipeline.chat_llm, "chat", fake_chat)
+
+    resp = await client.post("/api/generate", json={
+        "task_type": "text2music",
+        "caption": "custom tab vocal song",
+        "lyrics": "[verse]\nRejected custom lyric",
+        "instrumental": False,
+        "inference_steps": 1,
+    })
+
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    for _ in range(50):
+        job_resp = await client.get(f"/api/generate/{job_id}")
+        body = job_resp.json()
+        if body["status"] in {"completed", "failed"}:
+            break
+        await asyncio.sleep(0.01)
+
+    assert body["status"] == "failed", body
+    assert "Code of Conduct" in body["error"]
+    assert backend.last_generate_params is None
+
+
+@pytest.mark.asyncio
 async def test_get_nonexistent_job(client):
     resp = await client.get("/api/generate/nonexistent-id")
     assert resp.status_code == 404
@@ -72,7 +213,10 @@ async def test_format_when_lm_not_loaded(client):
     resp = await client.post("/api/format", json={
         "caption": "test caption",
     })
-    assert resp.status_code == 503
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert "Chat LLM" in body["error"]
 
 
 @pytest.mark.asyncio
@@ -80,4 +224,7 @@ async def test_sample_when_lm_not_loaded(client):
     resp = await client.post("/api/sample", json={
         "query": "happy pop song",
     })
-    assert resp.status_code == 503
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert "Chat LLM" in body["error"]

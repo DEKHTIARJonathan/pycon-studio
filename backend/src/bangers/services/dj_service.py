@@ -17,7 +17,14 @@ from bangers.db.connection import get_db
 from bangers.config import settings
 from bangers.services.duration_settings import get_default_duration
 from bangers.services.generation_request_builder import build_text_to_music_params
-from bangers.services.llm_provider import get_chat_runtime, installed_chat_models
+from bangers.services.lyrics_pipeline import (
+    MAX_GENERATED_LYRICS_ATTEMPTS,
+    LyricsPipelineError,
+    LyricsRejectedError,
+    coerce_instrumental,
+)
+from bangers.services import chat_llm
+from bangers.services.llm_provider import installed_chat_models
 
 DEFAULT_SYSTEM_PROMPT_TEMPLATE = """You are an AI DJ assistant for conda install bangers, a local music generation app.
 
@@ -224,12 +231,7 @@ class DJService:
         for m in msg_rows:
             llm_messages.append({"role": m["role"], "content": m["content"]})
 
-        # Resolve the user-selected chat model and pick its runtime.
-        settings_cursor = await db.execute(
-            "SELECT value FROM settings WHERE key = 'dj_model'"
-        )
-        row = await settings_cursor.fetchone()
-        model_name = row["value"] if row else ""
+        model_name = await chat_llm.get_configured_chat_model_name()
 
         if not model_name:
             return {
@@ -240,19 +242,9 @@ class DJService:
                 },
             }
 
-        runtime = get_chat_runtime(model_name)
-        if runtime is None:
-            return {
-                "error": {
-                    "error": "chat_runtime_unavailable",
-                    "message": (
-                        f"Selected chat model '{model_name}' requires a runtime that is not "
-                        "available on this machine. Pick a different model on the Models page."
-                    ),
-                },
-            }
-
-        if not runtime.is_model_loadable(model_name):
+        try:
+            runtime, model_name = await chat_llm.require_configured_chat_runtime()
+        except chat_llm.ChatLlmUnavailable:
             return {
                 "error": {
                     "error": "chat_model_not_installed",
@@ -266,28 +258,105 @@ class DJService:
 
         fallback_notice: str | None = None
 
-        try:
-            response_text = await runtime.chat(llm_messages, model_name)
-        except Exception as e:
-            logger.exception("DJ LLM call failed")
-            return {
-                "error": {
-                    "error": "chat_runtime_error",
-                    "message": f"LLM error: {e}",
-                },
-            }
+        response_text = ""
+        action = None
+        queued_gen_params = None
 
-        # Strip <think>...</think> blocks from models like Qwen3
-        response_text = re.sub(
-            r"<think>.*?</think>", "", response_text, flags=re.DOTALL
-        ).strip()
+        last_pipeline_error: LyricsPipelineError | None = None
+        for attempt in range(1, MAX_GENERATED_LYRICS_ATTEMPTS + 1):
+            attempt_messages = llm_messages
+            if last_pipeline_error is not None:
+                retry_system = (
+                    f"{system_prompt}\n\nFresh generation attempt {attempt} of "
+                    f"{MAX_GENERATED_LYRICS_ATTEMPTS}: the previous lyrics violated "
+                    "the platform Code of Conduct. Generate a completely new lyrical "
+                    "premise, new wording, and new imagery while preserving only the "
+                    "safe musical intent."
+                )
+                attempt_messages = [
+                    {"role": "system", "content": retry_system},
+                    *llm_messages[1:],
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous generated lyrics failed the platform lyrics "
+                            f"guardrails: {last_pipeline_error}. Generate a new, complete, "
+                            "compliant set of lyrics and do not reuse the rejected lyrics."
+                        ),
+                    },
+                ]
 
-        # Parse response for generation params or actions
-        gen_params = _extract_json_block(response_text)
-        action = _extract_action(response_text)
-        if gen_params:
+            try:
+                response_text = await runtime.chat(attempt_messages, model_name)
+            except Exception as e:
+                logger.exception("DJ LLM call failed")
+                return {
+                    "error": {
+                        "error": "chat_runtime_error",
+                        "message": f"LLM error: {e}",
+                    },
+                }
+
+            # Strip <think>...</think> blocks from models like Qwen3
+            response_text = re.sub(
+                r"<think>.*?</think>", "", response_text, flags=re.DOTALL
+            ).strip()
+
+            # Parse response for generation params or actions
+            gen_params = _extract_json_block(response_text)
+            action = _extract_action(response_text)
+            queued_gen_params = None
+            if not gen_params:
+                break
+
             default_duration = await get_default_duration()
             gen_params["duration"] = default_duration
+            try:
+                from bangers.services.generation import generation_service
+
+                gen_params = await generation_service.prepare_params(gen_params)
+                queued_gen_params = generation_service.public_params(gen_params)
+                break
+            except LyricsRejectedError as exc:
+                last_pipeline_error = exc
+                logger.warning(
+                    "DJ lyrics violated guardrails on attempt {}/{}: {}",
+                    attempt,
+                    MAX_GENERATED_LYRICS_ATTEMPTS,
+                    exc,
+                )
+                if attempt == MAX_GENERATED_LYRICS_ATTEMPTS:
+                    return {
+                        "error": {
+                            "error": "lyrics_pipeline_error",
+                            "message": (
+                                "Generated lyrics violated the Code of Conduct "
+                                f"{MAX_GENERATED_LYRICS_ATTEMPTS} times. Generation stopped."
+                            ),
+                        },
+                    }
+            except LyricsPipelineError as exc:
+                last_pipeline_error = exc
+                logger.warning(
+                    "DJ lyrics failed guardrails on attempt {}/{}: {}",
+                    attempt,
+                    MAX_GENERATED_LYRICS_ATTEMPTS,
+                    exc,
+                )
+                if attempt == MAX_GENERATED_LYRICS_ATTEMPTS:
+                    return {
+                        "error": {
+                            "error": "lyrics_pipeline_error",
+                            "message": str(exc),
+                        },
+                    }
+            except Exception as exc:
+                return {
+                    "error": {
+                        "error": "lyrics_pipeline_error",
+                        "message": str(exc),
+                    },
+                }
 
         # Clean action tags and JSON code blocks from the display text
         display_text = re.sub(r"\[ACTION:\w+\]", "", response_text)
@@ -297,7 +366,7 @@ class DJService:
         # Save assistant message
         assistant_msg_id = str(uuid.uuid4())
         assistant_now = datetime.now(timezone.utc).isoformat()
-        gen_params_json = json.dumps(gen_params) if gen_params else None
+        gen_params_json = json.dumps(queued_gen_params) if queued_gen_params else None
         generation_job_id = None
 
         # Generate conversation title BEFORE firing generation task to avoid
@@ -312,7 +381,7 @@ class DJService:
             auto_title = await generate_conversation_title(user_content)
 
         # Trigger generation if params were provided
-        if gen_params:
+        if queued_gen_params:
             try:
                 from bangers.services.generation import generation_service
 
@@ -323,7 +392,7 @@ class DJService:
                     # Fire and forget generation
                     import asyncio
                     asyncio.create_task(
-                        self._run_dj_generation(job_id, gen_params, model_name)
+                        self._run_dj_generation(job_id, queued_gen_params, model_name)
                     )
                 else:
                     fallback_notice = (
@@ -400,7 +469,7 @@ class DJService:
             params = build_text_to_music_params(
                 prompt,
                 lyrics=raw_lyrics,
-                instrumental=bool(params.get("instrumental", not raw_lyrics.strip())),
+                instrumental=coerce_instrumental(params.get("instrumental", not raw_lyrics.strip())),
                 vocal_language="en",
                 duration=float(params.get("duration") or default_duration),
                 batch_size=1,
@@ -414,17 +483,24 @@ class DJService:
             if dj_model:
                 params["dj_model"] = dj_model
 
+            if hasattr(generation_service, "prepare_params"):
+                params = await generation_service.prepare_params(
+                    params,
+                    allow_holders=frozenset({"dj"}),
+                )
+
             # Insert generation history record
             db = await get_db()
+            history_params = generation_service.public_params(params)
             await db.execute(
                 """INSERT INTO generation_history (id, task_type, status, params_json, started_at, created_at)
                    VALUES (?, ?, 'running', ?, ?, ?)""",
                 (history_id, params.get("task_type", "text2music"),
-                 json.dumps(params), started_at.isoformat(), started_at.isoformat()),
+                 json.dumps(history_params), started_at.isoformat(), started_at.isoformat()),
             )
             await db.commit()
 
-            result = await generation_service.generate(params)
+            result = await generation_service.generate(params, lyrics_prepared=True)
 
             if result.get("success"):
                 audios = result.get("audios", [])
@@ -565,6 +641,7 @@ class DJService:
 
         return {
             "active_model": active_model,
+            "loaded_model": chat_llm.get_loaded_chat_model_name(),
             "installed_models": installed_chat_models(),
             "system_prompt": custom_system_prompt,
             "default_system_prompt": await _get_default_system_prompt(),
@@ -577,10 +654,7 @@ class DJService:
     ) -> dict[str, Any]:
         db = await get_db()
         if model is not None:
-            await db.execute(
-                "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('dj_model', ?, datetime('now'))",
-                (model,),
-            )
+            await chat_llm.switch_chat_model(model)
         if system_prompt is not None:
             default_system_prompt = await _get_default_system_prompt()
             if system_prompt.strip() == "" or system_prompt.strip() == default_system_prompt.strip():

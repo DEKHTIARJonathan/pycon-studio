@@ -67,6 +67,19 @@ export function useRadioPlayback(): void {
         return;
       }
 
+      if (!result.success || !result.song) {
+        toast.error("Radio generation failed", {
+          description: result.error ?? "Unknown error",
+        });
+        radioEngine.stop();
+        useRadioStore.getState().stopStation();
+        usePlayerStore.setState({ isPlaying: false });
+        releaseGenLock();
+        setIsGenerating(false);
+        useGpuStore.getState().clear();
+        return;
+      }
+
       if (result.success && result.song) {
         const song = result.song as SongResponse;
         const audioUrl = getSongAudioUrl(song.id);

@@ -353,13 +353,41 @@ async def _run_generation(job_id: str, request: GenerateRequest) -> None:
     if svc.active_lm_model:
         params_dict["lm_model"] = svc.active_lm_model
 
+    try:
+        lyrics_started = time.perf_counter()
+        params_dict = await svc.prepare_params(
+            params_dict,
+            allow_holders=frozenset({"generation"}),
+        )
+        timings["lyrics_pipeline_ms"] = round(
+            (time.perf_counter() - lyrics_started) * 1000,
+            2,
+        )
+    except Exception as e:
+        logger.warning(f"Generation lyrics pipeline failed: {e}")
+        svc.update_job(
+            job_id,
+            status="failed",
+            error=str(e),
+            timings=timings,
+            history_id=history_id,
+        )
+        await gpu_lock.release("generation")
+        await generation_ws_manager.broadcast({
+            "type": "failed",
+            "job_id": job_id,
+            "error": str(e),
+        })
+        return
+
     # Insert initial history record
     try:
         db = await get_db()
+        history_params = svc.public_params(params_dict)
         await db.execute(
             """INSERT INTO generation_history (id, task_type, status, params_json, started_at, created_at)
                VALUES (?, ?, 'running', ?, ?, ?)""",
-            (history_id, request.task_type, json.dumps(params_dict),
+            (history_id, request.task_type, json.dumps(history_params),
              started_at.isoformat(), started_at.isoformat()),
         )
         await db.commit()
@@ -445,7 +473,11 @@ async def _run_generation(job_id: str, request: GenerateRequest) -> None:
     try:
         try:
             generation_started = time.perf_counter()
-            result = await svc.generate(params_dict, progress_callback=lm_interpolator)
+            result = await svc.generate(
+                params_dict,
+                progress_callback=lm_interpolator,
+                lyrics_prepared=True,
+            )
             timings["music_generation_ms"] = round((time.perf_counter() - generation_started) * 1000, 2)
             if current_stage_bucket is not None:
                 key = f"stage_{current_stage_bucket}_ms"
@@ -680,8 +712,6 @@ format_router = APIRouter(tags=["generation"])
 @format_router.post("/format", response_model=FormatResponse)
 async def format_caption(request: FormatRequest) -> FormatResponse:
     svc = generation_service
-    if not svc.lm_initialized:
-        raise HTTPException(status_code=503, detail="LM model not loaded")
 
     await gpu_lock.await_acquire("format")
 
@@ -696,11 +726,20 @@ async def format_caption(request: FormatRequest) -> FormatResponse:
         user_metadata["duration"] = await get_default_duration()
         user_metadata["language"] = "en"
 
-        result = await svc.format_sample(
-            caption=request.caption,
-            lyrics=request.lyrics,
-            user_metadata=user_metadata or None,
-        )
+        try:
+            result = await svc.format_sample(
+                caption=request.caption,
+                lyrics=request.lyrics,
+                user_metadata=user_metadata or None,
+                allow_holders=frozenset({"format"}),
+            )
+        except Exception as exc:
+            result = {
+                "caption": request.caption,
+                "lyrics": request.lyrics,
+                "success": False,
+                "error": str(exc),
+            }
 
         return FormatResponse(**result)
     finally:
@@ -737,18 +776,26 @@ async def generate_title(request: GenerateTitleRequest) -> GenerateTitleResponse
 @format_router.post("/sample", response_model=SampleResponse)
 async def create_sample(request: SampleRequest) -> SampleResponse:
     svc = generation_service
-    if not svc.lm_initialized:
-        raise HTTPException(status_code=503, detail="LM model not loaded")
 
     await gpu_lock.await_acquire("sample")
 
     try:
-        result = await svc.create_sample(
-            query=request.query,
-            instrumental=request.instrumental,
-            vocal_language="en",
-            temperature=request.temperature,
-        )
+        try:
+            result = await svc.create_sample(
+                query=request.query,
+                instrumental=request.instrumental,
+                vocal_language="en",
+                temperature=request.temperature,
+                allow_holders=frozenset({"sample"}),
+            )
+        except Exception as exc:
+            result = {
+                "caption": request.query,
+                "lyrics": "",
+                "instrumental": request.instrumental,
+                "success": False,
+                "error": str(exc),
+            }
         result["duration"] = await get_default_duration()
 
         return SampleResponse(**result)

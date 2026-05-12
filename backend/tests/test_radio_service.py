@@ -61,7 +61,13 @@ class _FakeGenerationService:
         self.sample_lock_holders: list[str | None] = []
         self.generate_lock_holders: list[str | None] = []
 
-    async def generate(self, params: dict) -> dict:
+    async def prepare_params(self, params: dict, **_kwargs) -> dict:
+        return dict(params)
+
+    def public_params(self, params: dict) -> dict:
+        return dict(params)
+
+    async def generate(self, params: dict, **_kwargs) -> dict:
         if self.lock is not None:
             self.generate_lock_holders.append(self.lock.holder)
         self.calls.append(dict(params))
@@ -213,6 +219,30 @@ async def test_invalid_radio_llm_json_falls_back_to_template_lyrics(client, monk
     assert result["success"] is True
     assert fake_generation.calls[0]["lyrics"].startswith("[verse]")
     assert "song" in fake_generation.calls[0]["lyrics"].lower()
+
+
+@pytest.mark.asyncio
+async def test_radio_rejected_generated_lyrics_stop_generation(client, monkeypatch):
+    from bangers.services import radio_service as radio_module
+    from bangers.services.radio_service import radio_service
+    from bangers.services.lyrics_pipeline import LyricsRejectedError
+    from bangers.config import settings
+
+    fake_generation = _FakeGenerationService(settings.AUDIO_DIR)
+    monkeypatch.setattr(radio_module, "generation_service", fake_generation)
+    monkeypatch.setattr(radio_module, "gpu_lock", _FakeGpuLock())
+
+    async def rejected_spec(_station):
+        raise LyricsRejectedError("Generated lyrics were too unsafe.")
+
+    monkeypatch.setattr(radio_service, "_generate_song_spec_with_llm", rejected_spec)
+
+    station = await _station(instrumental=False)
+    result = await radio_service.generate_next_track(station.id)
+
+    assert result["success"] is False
+    assert "Code of Conduct" in result["error"]
+    assert fake_generation.calls == []
 
 
 @pytest.mark.asyncio

@@ -50,7 +50,7 @@ echo "Fresh data directory ready: $data_dir"
 
 [tasks.dev]
 description = "Run the local backend and frontend without Docker"
-run = "python start.py"
+run = "python -u start.py"
 
 [tasks.test]
 description = "Run backend and frontend tests once"

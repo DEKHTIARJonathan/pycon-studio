@@ -20,38 +20,15 @@ from bangers.services.duration_settings import get_default_duration
 from bangers.services.generation import generation_service
 from bangers.services.generation_request_builder import build_text_to_music_params
 from bangers.services.gpu_lock import gpu_lock
-from bangers.services.llm_provider import (
-    ChatRuntime,
-    get_chat_runtime,
-    installed_chat_models,
-)
+from bangers.services import chat_llm
+from bangers.services.llm_provider import ChatRuntime, installed_chat_models
+from bangers.services.lyrics_pipeline import LyricsRejectedError, generate_song_spec
 from bangers.services.title_generator import clean_title
 
 RADIO_DEFAULT_SYSTEM_PROMPT = """You are a music caption generator. Given station parameters, write a creative, \
 detailed caption for an AI music generator. Describe instrumentation, texture, \
 atmosphere, and sonic qualities. Be specific and varied — each caption should \
 feel unique. Output ONLY the caption text, nothing else."""
-
-
-def _json_from_llm_text(raw: str) -> dict[str, Any]:
-    """Parse a JSON object from an LLM response that may include fences."""
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        if lines:
-            lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        cleaned = "\n".join(lines).strip()
-
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start >= 0 and end > start:
-            return json.loads(cleaned[start:end + 1])
-        raise
 
 
 def _row_to_station(row) -> StationResponse:
@@ -227,20 +204,18 @@ class RadioService:
         """
         db = await get_db()
         cursor = await db.execute(
-            "SELECT key, value FROM settings WHERE key IN ("
-            "'radio_llm_model', 'radio_system_prompt')"
+            "SELECT key, value FROM settings WHERE key = 'radio_system_prompt'"
         )
         rows = await cursor.fetchall()
-        active_model = ""
+        active_model = await chat_llm.get_configured_chat_model_name()
         custom_system_prompt = ""
         for r in rows:
-            if r["key"] == "radio_llm_model":
-                active_model = r["value"]
-            elif r["key"] == "radio_system_prompt":
+            if r["key"] == "radio_system_prompt":
                 custom_system_prompt = r["value"]
 
         return {
             "active_model": active_model,
+            "loaded_model": chat_llm.get_loaded_chat_model_name(),
             "installed_models": installed_chat_models(),
             "system_prompt": custom_system_prompt,
             "default_system_prompt": RADIO_DEFAULT_SYSTEM_PROMPT,
@@ -254,10 +229,7 @@ class RadioService:
         """Update radio caption-LLM settings."""
         db = await get_db()
         if model is not None:
-            await db.execute(
-                "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('radio_llm_model', ?, datetime('now'))",
-                (model,),
-            )
+            await chat_llm.switch_chat_model(model)
         if system_prompt is not None:
             if system_prompt.strip() == "" or system_prompt.strip() == RADIO_DEFAULT_SYSTEM_PROMPT.strip():
                 await db.execute(
@@ -280,26 +252,18 @@ class RadioService:
         """
         db = await get_db()
         cursor = await db.execute(
-            "SELECT key, value FROM settings WHERE key IN ("
-            "'radio_llm_model', 'radio_system_prompt')"
+            "SELECT key, value FROM settings WHERE key = 'radio_system_prompt'"
         )
         rows = await cursor.fetchall()
-        model_name = ""
         custom_prompt = ""
         for r in rows:
-            if r["key"] == "radio_llm_model":
-                model_name = r["value"]
-            elif r["key"] == "radio_system_prompt":
+            if r["key"] == "radio_system_prompt":
                 custom_prompt = r["value"]
 
         system_prompt = custom_prompt if custom_prompt.strip() else RADIO_DEFAULT_SYSTEM_PROMPT
-
-        if not model_name:
-            return (None, "", system_prompt)
-
-        runtime = get_chat_runtime(model_name)
-        if runtime is None or not runtime.is_model_loadable(model_name):
-            logger.info(f"Radio LLM '{model_name}' not loadable on this machine; using template caption")
+        runtime, model_name = await chat_llm.get_configured_chat_runtime()
+        if runtime is None:
+            logger.info("Radio LLM: no app Chat LLM is loadable; using template caption")
             return (None, model_name, system_prompt)
         return (runtime, model_name, system_prompt)
 
@@ -362,45 +326,27 @@ class RadioService:
         self, station: StationResponse
     ) -> Optional[dict[str, str]]:
         """Generate a vocal radio caption and lyrics with the configured radio LLM."""
-        provider, model_name, system_prompt = await self._get_radio_llm()
-        if provider is None:
-            logger.info("Radio lyrics: no LLM provider available, using fallback")
-            return None
-
-        logger.info(f"Radio lyrics: generating via {model_name}")
         parts = self._station_prompt_parts(station)
-        user_message = (
+        _provider, model_name, system_prompt = await self._get_radio_llm()
+        if not model_name:
+            logger.info("Radio lyrics: no app Chat LLM available, using fallback")
+            return None
+        logger.info(f"Radio lyrics: generating via {model_name}")
+        prompt = (
             "Generate a unique vocal song spec for these radio station parameters:\n"
             + "\n".join(parts)
             + "\n\nCaption style guidance:\n"
             + system_prompt
-            + "\n\nReturn valid JSON only with this exact shape:\n"
-            + '{"caption":"music generation caption","lyrics":"[verse]\\n...\\n[chorus]\\n..."}'
         )
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a professional songwriter and music prompt writer. "
-                    "Write original lyrics for a vocal track. Use clear section "
-                    "tags such as [verse], [chorus], [bridge], and [outro]. "
-                    "Return only valid JSON with string fields caption and lyrics."
-                ),
-            },
-            {"role": "user", "content": user_message},
-        ]
 
         try:
-            raw = await provider.chat(
-                messages,
-                model=model_name,
-                max_tokens=2048,
-                temperature=0.8,
+            spec = await generate_song_spec(
+                prompt,
+                instrumental=False,
                 allow_holders=frozenset({"radio"}),
             )
-            parsed = _json_from_llm_text(raw)
-            caption = str(parsed.get("caption", "")).strip()
-            lyrics = str(parsed.get("lyrics", "")).strip()
+            caption = str(spec.get("caption", "")).strip()
+            lyrics = str(spec.get("lyrics", "")).strip()
             if caption and lyrics:
                 logger.info(
                     f"Radio LLM lyric spec generated ({len(caption)} caption chars, {len(lyrics)} lyric chars)"
@@ -408,6 +354,8 @@ class RadioService:
                 return {"caption": caption, "lyrics": lyrics}
             logger.warning("Radio LLM lyric spec missing caption or lyrics")
             return None
+        except LyricsRejectedError:
+            raise
         except Exception as e:
             logger.warning(f"Radio LLM lyric spec generation failed ({model_name}): {e}")
             return None
@@ -416,9 +364,6 @@ class RadioService:
         self, station: StationResponse, fallback_caption: str
     ) -> Optional[dict[str, str]]:
         """Use the existing sample-generation path to produce vocal lyrics."""
-        if not generation_service.lm_initialized:
-            return None
-
         query_parts = [station.name]
         if station.genre:
             query_parts.append(station.genre)
@@ -434,6 +379,7 @@ class RadioService:
                 instrumental=False,
                 vocal_language="en",
                 temperature=0.85,
+                allow_holders=frozenset({"radio"}),
             )
             if not sample.get("success", True):
                 return None
@@ -442,6 +388,8 @@ class RadioService:
                 return None
             caption = str(sample.get("caption", "")).strip() or fallback_caption
             return {"caption": caption, "lyrics": lyrics}
+        except LyricsRejectedError:
+            raise
         except Exception as e:
             logger.warning(f"Radio sample lyric generation failed: {e}")
             return None
@@ -642,23 +590,30 @@ class RadioService:
             if generation_service.active_lm_model:
                 params_dict["lm_model"] = generation_service.active_lm_model
 
+            if hasattr(generation_service, "prepare_params"):
+                params_dict = await generation_service.prepare_params(
+                    params_dict,
+                    allow_holders=frozenset({"radio"}),
+                )
+
             # Create generation history entry
             history_id = str(uuid.uuid4())
             started_at = datetime.now(timezone.utc)
             db = await get_db()
+            history_params = generation_service.public_params(params_dict)
             await db.execute(
                 """INSERT INTO generation_history (id, task_type, status, params_json, started_at, created_at)
                    VALUES (?, 'text2music', 'running', ?, ?, ?)""",
                 (
                     history_id,
-                    json.dumps(params_dict),
+                    json.dumps(history_params),
                     started_at.isoformat(),
                     started_at.isoformat(),
                 ),
             )
             await db.commit()
 
-            result = await generation_service.generate(params_dict)
+            result = await generation_service.generate(params_dict, lyrics_prepared=True)
 
             if result.get("success") and result.get("audios") and song_title is None:
                 from bangers.services.title_generator import pick_random_title

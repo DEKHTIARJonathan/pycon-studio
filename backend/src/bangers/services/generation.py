@@ -4,6 +4,13 @@ from typing import Any, Callable, Optional
 
 from bangers.backends.ace_step_backend import AceStepBackend
 from bangers.services.generation_request_builder import normalize_generation_params
+from bangers.services.lyrics_pipeline import (
+    format_song_spec,
+    generate_song_spec,
+    is_lyrics_pipeline_prepared,
+    prepare_generation_params,
+    strip_lyrics_pipeline_internal_keys,
+)
 
 
 class GenerationService:
@@ -82,22 +89,55 @@ class GenerationService:
         return await self.backend.initialize_lm(**kwargs)
 
     async def create_sample(self, **kwargs: Any) -> dict[str, Any]:
-        return await self.backend.create_sample(**kwargs)
+        query = str(kwargs.pop("query", "") or "")
+        kwargs.pop("vocal_language", None)
+        kwargs.pop("temperature", None)
+        return await generate_song_spec(query, **kwargs)
 
     async def format_sample(self, **kwargs: Any) -> dict[str, Any]:
-        return await self.backend.format_sample(**kwargs)
+        return await format_song_spec(**kwargs)
+
+    async def prepare_params(
+        self,
+        params_dict: dict[str, Any],
+        *,
+        allow_holders: frozenset[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_params = normalize_generation_params(params_dict)
+        return await prepare_generation_params(
+            normalized_params,
+            allow_holders=allow_holders,
+        )
+
+    def public_params(self, params_dict: dict[str, Any]) -> dict[str, Any]:
+        return strip_lyrics_pipeline_internal_keys(params_dict)
 
     async def generate(
         self,
         params_dict: dict[str, Any],
         progress_callback: Optional[Callable] = None,
+        *,
+        lyrics_prepared: bool = False,
     ) -> dict[str, Any]:
         if not self.backend.is_ready:
             return {"success": False, "error": "ACE-Step backend not initialized"}
 
         try:
-            normalized_params = normalize_generation_params(params_dict)
+            if lyrics_prepared and is_lyrics_pipeline_prepared(params_dict):
+                normalized_params = normalize_generation_params(params_dict)
+            else:
+                from bangers.services.gpu_lock import gpu_lock
+
+                holder = gpu_lock.holder if gpu_lock.is_locked else None
+                allow_holders = frozenset({holder}) if holder else None
+                normalized_params = await self.prepare_params(
+                    params_dict,
+                    allow_holders=allow_holders,
+                )
+            normalized_params = self.public_params(normalized_params)
         except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+        except Exception as exc:
             return {"success": False, "error": str(exc)}
 
         return await self.backend.generate(normalized_params, progress_callback=progress_callback)

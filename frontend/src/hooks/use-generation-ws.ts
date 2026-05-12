@@ -182,7 +182,13 @@ export function useGenerationWs() {
         try {
           store.updateJob(job_id, { status: "failed", error: errorMsg });
         } catch { /* job may have been cleaned up */ }
-        toast.error(errorMsg);
+        if (errorMsg.toLowerCase().includes("code of conduct")) {
+          toast.error("Lyrics violate the Code of Conduct", {
+            description: errorMsg,
+          });
+        } else {
+          toast.error(errorMsg);
+        }
         store.setIsGenerating(false);
         useGpuStore.getState().clear();
       }

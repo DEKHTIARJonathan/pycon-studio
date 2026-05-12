@@ -3,6 +3,7 @@
 
 import os
 import argparse
+import errno
 import signal
 import subprocess
 import sys
@@ -23,6 +24,12 @@ BACKEND_PYPROJECT_FILE = BACKEND_DIR / "pyproject.toml"
 PYTORCH_CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu130"
 DEFAULT_DATA_DIR = BACKEND_DIR / "data"
 DEFAULT_MODEL_CACHE_DIR = ROOT / ".cache" / "models"
+RUNTIME_LOG_FILE = ROOT / "runtime.log"
+
+_ORIGINAL_STDOUT = sys.stdout
+_ORIGINAL_STDERR = sys.stderr
+_RUNTIME_LOG_LOCK = threading.Lock()
+_RUNTIME_LOG_HANDLE = None
 
 # Self-signed cert + key shared by both Next.js and uvicorn. Generated once
 # and reused on every restart (regenerated only if missing or expired). Lives
@@ -41,6 +48,92 @@ RED = "\033[91m"
 CYAN = "\033[96m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
+
+
+def _write_runtime_log_bytes(data: bytes) -> None:
+    if _RUNTIME_LOG_HANDLE is None:
+        return
+    with _RUNTIME_LOG_LOCK:
+        _RUNTIME_LOG_HANDLE.write(data)
+        _RUNTIME_LOG_HANDLE.flush()
+
+
+class _RuntimeLogTextTee:
+    """Text stream that keeps console TTY behavior while appending to runtime.log."""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    @property
+    def encoding(self):
+        return getattr(self._stream, "encoding", "utf-8")
+
+    @property
+    def errors(self):
+        return getattr(self._stream, "errors", "replace")
+
+    def write(self, text) -> int:
+        if not isinstance(text, str):
+            text = str(text)
+        written = self._stream.write(text)
+        _write_runtime_log_bytes(
+            text.encode(self.encoding or "utf-8", errors=self.errors or "replace")
+        )
+        return written
+
+    def flush(self) -> None:
+        self._stream.flush()
+        if _RUNTIME_LOG_HANDLE is not None:
+            with _RUNTIME_LOG_LOCK:
+                _RUNTIME_LOG_HANDLE.flush()
+
+    def isatty(self) -> bool:
+        return self._stream.isatty()
+
+    def fileno(self) -> int:
+        return self._stream.fileno()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def _install_runtime_logging() -> None:
+    global _RUNTIME_LOG_HANDLE
+    if _RUNTIME_LOG_HANDLE is not None:
+        return
+    _RUNTIME_LOG_HANDLE = RUNTIME_LOG_FILE.open("ab", buffering=0)
+    sys.stdout = _RuntimeLogTextTee(_ORIGINAL_STDOUT)
+    sys.stderr = _RuntimeLogTextTee(_ORIGINAL_STDERR)
+
+
+def _write_console_bytes(data: bytes) -> None:
+    stream = getattr(_ORIGINAL_STDOUT, "buffer", None)
+    if stream is not None:
+        stream.write(data)
+        stream.flush()
+    else:
+        _ORIGINAL_STDOUT.write(data.decode("utf-8", errors="replace"))
+        _ORIGINAL_STDOUT.flush()
+
+
+def _pipe_pty_to_console_and_log(master_fd: int) -> None:
+    try:
+        while True:
+            try:
+                chunk = os.read(master_fd, 4096)
+            except OSError as exc:
+                if exc.errno == errno.EIO:
+                    break
+                raise
+            if not chunk:
+                break
+            _write_console_bytes(chunk)
+            _write_runtime_log_bytes(chunk)
+    finally:
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
 
 
 def log(msg: str, color: str = GREEN) -> None:
@@ -197,7 +290,29 @@ def _popen(cmd: list[str], **kwargs) -> subprocess.Popen:
     """Open a subprocess, using shell=True on Windows so .cmd wrappers are found."""
     if sys.platform == "win32":
         return subprocess.Popen(cmd, shell=True, **kwargs)
-    return subprocess.Popen(cmd, **kwargs)
+    if _RUNTIME_LOG_HANDLE is None:
+        return subprocess.Popen(cmd, **kwargs)
+
+    import pty
+
+    master_fd, slave_fd = pty.openpty()
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            **kwargs,
+        )
+    finally:
+        os.close(slave_fd)
+
+    reader = threading.Thread(
+        target=_pipe_pty_to_console_and_log,
+        args=(master_fd,),
+        daemon=True,
+    )
+    reader.start()
+    return proc
 
 
 def _cert_is_fresh(cert_path: Path, sans: list[str]) -> bool:
@@ -440,6 +555,8 @@ def install_dependencies() -> None:
 
 
 def main() -> None:
+    _install_runtime_logging()
+
     parser = argparse.ArgumentParser(description="Run conda install bangers locally")
     parser.add_argument("--install", action="store_true", help="Force reinstall all dependencies")
     parser.add_argument("--no-open", action="store_true", help="Do not open the browser automatically")

@@ -178,7 +178,25 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning(f"DiT model failed to load: {status}")
 
-    asyncio.create_task(_init_active())
+    async def _init_active_chat():
+        chat_model = saved.get("dj_model", "")
+        if not chat_model:
+            logger.info("Chat LLM: no model selected, skipping initialization")
+            return
+        try:
+            from bangers.services.chat_llm import warm_chat_model
+
+            logger.info(f"Initializing Chat LLM: {chat_model}")
+            await warm_chat_model(chat_model)
+            logger.info("Chat LLM loaded successfully")
+        except Exception as exc:
+            logger.warning(f"Chat LLM failed to load: {exc}")
+
+    async def _init_models():
+        await _init_active()
+        await _init_active_chat()
+
+    asyncio.create_task(_init_models())
 
     async def _cleanup_loop():
         while True:

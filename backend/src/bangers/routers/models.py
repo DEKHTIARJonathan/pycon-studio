@@ -30,6 +30,12 @@ from bangers.models.common import (
     SwitchModelRequest,
 )
 from bangers.services.generation import generation_service
+from bangers.services.chat_llm import (
+    ChatLlmUnavailable,
+    get_loaded_chat_model_name,
+    switch_chat_model,
+)
+from bangers.services.llm_provider import ChatRuntimeBusy
 
 router = APIRouter(tags=["models"])
 
@@ -51,7 +57,7 @@ class ModelsResponse(BaseModel):
     chat_llm_models: list[ModelInfo] = []
 
 
-def _scan_checkpoints(active_chat_llm: str = "") -> ModelsResponse:
+def _scan_checkpoints(loaded_chat_llm: str = "") -> ModelsResponse:
     checkpoints_dir = Path(settings.ACESTEP_PROJECT_ROOT) / "checkpoints"
     chat_llm_dir = Path(settings.ACESTEP_PROJECT_ROOT) / "chat-llm"
     dit_models: list[ModelInfo] = []
@@ -86,7 +92,7 @@ def _scan_checkpoints(active_chat_llm: str = "") -> ModelsResponse:
                 chat_llm_models.append(ModelInfo(
                     name=name,
                     model_type="chat_llm",
-                    is_active=(name == active_chat_llm),
+                    is_active=(name == loaded_chat_llm),
                     compatibility=list(CHAT_LLM_COMPATIBILITY.get(name, ())),
                     format=CHAT_LLM_FORMATS.get(name, ""),
                     quantization=CHAT_LLM_QUANTIZATIONS.get(name, ""),
@@ -101,19 +107,7 @@ def _scan_checkpoints(active_chat_llm: str = "") -> ModelsResponse:
 
 @router.get("/models", response_model=ModelsResponse)
 async def list_models() -> ModelsResponse:
-    from bangers.db.connection import get_db
-
-    active_chat_llm = ""
-    try:
-        db = await get_db()
-        cursor = await db.execute("SELECT value FROM settings WHERE key = 'dj_model'")
-        row = await cursor.fetchone()
-        if row:
-            active_chat_llm = row["value"]
-    except Exception:
-        pass
-
-    return _scan_checkpoints(active_chat_llm=active_chat_llm)
+    return _scan_checkpoints(loaded_chat_llm=get_loaded_chat_model_name())
 
 
 def _scan_dir_bytes(path: Path) -> int:
@@ -390,6 +384,50 @@ async def switch_lm_model(request: SwitchModelRequest) -> dict[str, str]:
         raise HTTPException(status_code=500, detail=status)
 
     return {"message": f"LM model switched to {request.model_name}"}
+
+
+@router.post("/models/switch-chat-llm")
+async def switch_chat_llm_model(request: SwitchModelRequest) -> dict[str, str]:
+    model_name = request.model_name
+    if not _SAFE_MODEL_NAME.match(model_name):
+        raise HTTPException(status_code=400, detail="Invalid model name")
+    if model_name not in CHAT_LLM_REGISTRY:
+        raise HTTPException(status_code=400, detail=f"Unknown Chat LLM: {model_name}")
+    if not _chat_llm_runtime_supported(model_name):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{model_name} requires MLX on macOS.",
+        )
+
+    try:
+        await switch_chat_model(model_name)
+    except ChatRuntimeBusy as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "chat_llm_busy",
+                "message": str(exc),
+            },
+        ) from exc
+    except ChatLlmUnavailable as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "chat_llm_unavailable",
+                "message": str(exc),
+            },
+        ) from exc
+    except Exception as exc:
+        logger.exception(f"Chat LLM switch failed: {model_name}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "chat_llm_load_failed",
+                "message": str(exc),
+            },
+        ) from exc
+
+    return {"message": f"Chat LLM loaded: {model_name}"}
 
 
 @router.get("/models/gpu-stats", response_model=GpuStatsResponse)

@@ -306,4 +306,10 @@ export const switchLmModel = (modelName: string, runtime?: string) =>
     body: JSON.stringify({ model_name: modelName, runtime }),
   });
 
+export const switchChatLlmModel = (modelName: string) =>
+  request<{ message: string }>("/models/switch-chat-llm", {
+    method: "POST",
+    body: JSON.stringify({ model_name: modelName }),
+  });
+
 export const fetchGpuStats = () => request<GpuStats>("/models/gpu-stats");

@@ -20,6 +20,7 @@ DEFAULT_THROTTLE_RADIO_ONLY = True
 DEFAULT_KEEP_ACTIVE_MODELS_RESIDENT = True
 DEFAULT_PARALLEL_PIPELINE_ENABLED = False
 DEFAULT_FAST_CREATE_MODE = True
+DEFAULT_LYRICS_GUARDRAILS_ENABLED = True
 
 
 def _bool_string(value: str | bool) -> str:
@@ -155,6 +156,7 @@ class Settings:
             "keep_active_models_resident": _bool_string(DEFAULT_KEEP_ACTIVE_MODELS_RESIDENT),
             "parallel_pipeline_enabled": _bool_string(DEFAULT_PARALLEL_PIPELINE_ENABLED),
             "fast_create_mode": _bool_string(DEFAULT_FAST_CREATE_MODE),
+            "lyrics_guardrails_enabled": _bool_string(DEFAULT_LYRICS_GUARDRAILS_ENABLED),
         }
 
     def ensure_dirs(self) -> None:

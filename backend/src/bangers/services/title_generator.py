@@ -11,8 +11,8 @@ import re
 
 from loguru import logger
 
-from bangers.db.connection import get_db
-from bangers.services.llm_provider import ChatRuntime, ChatRuntimeBusy, get_chat_runtime
+from bangers.services import chat_llm
+from bangers.services.llm_provider import ChatRuntime, ChatRuntimeBusy
 
 _THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think\s*>", re.IGNORECASE | re.DOTALL)
 _ORPHAN_THINK_PREFIX_RE = re.compile(r"^\s*.*?</think\s*>\s*", re.IGNORECASE | re.DOTALL)
@@ -84,26 +84,7 @@ async def _get_configured_llm() -> tuple[ChatRuntime | None, str]:
     Returns ``(None, "")`` when no chat model is selected or its runtime
     isn't available on this machine.
     """
-    model_name = ""
-    try:
-        db = await get_db()
-        cursor = await db.execute(
-            "SELECT value FROM settings WHERE key = 'dj_model'"
-        )
-        row = await cursor.fetchone()
-        if row:
-            model_name = row["value"]
-    except Exception as e:
-        logger.debug(f"Failed to read dj_model from settings: {e}")
-        return (None, "")
-
-    if not model_name:
-        return (None, "")
-
-    runtime = get_chat_runtime(model_name)
-    if runtime is None or not runtime.is_model_loadable(model_name):
-        return (None, model_name)
-    return (runtime, model_name)
+    return await chat_llm.get_configured_chat_runtime()
 
 
 def clean_title(raw: str) -> str:

@@ -13,8 +13,13 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
-import { fetchModels, fetchAvailableModels, downloadModel } from "@/lib/api/client";
-import { fetchDJInfo, updateDJSettings } from "@/lib/api/dj-client";
+import {
+  fetchModels,
+  fetchAvailableModels,
+  downloadModel,
+  switchChatLlmModel,
+} from "@/lib/api/client";
+import { fetchDJInfo } from "@/lib/api/dj-client";
 import type { AvailableModel, ModelInfo } from "@/types/api";
 import { ModelCards } from "./model-cards";
 import { GpuStats } from "./gpu-stats";
@@ -28,6 +33,7 @@ type ChatLlmRow =
       format: string;
       quantization: string;
       description: string;
+      isActive: boolean;
     }
   | {
       state: "downloadable";
@@ -43,6 +49,7 @@ type ChatLlmRow =
       format: string;
       quantization: string;
       description: string;
+      isActive: boolean;
     };
 
 const IS_MAC =
@@ -95,14 +102,17 @@ export function ModelsClient() {
     retry: false,
   });
 
-  const djSettingsMutation = useMutation({
-    mutationFn: updateDJSettings,
-    onSuccess: (data) => {
-      queryClient.setQueryData(["dj-info"], data);
-      toast.success("Chat model selected");
+  const chatLlmSwitchMutation = useMutation({
+    mutationFn: switchChatLlmModel,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["models"] });
+      queryClient.invalidateQueries({ queryKey: ["dj-info"] });
+      queryClient.invalidateQueries({ queryKey: ["radio-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      toast.success("Chat model loaded");
     },
     onError: (err: Error) => {
-      toast.error(`Failed to select chat model: ${err.message}`);
+      toast.error(`Failed to load chat model: ${err.message}`);
     },
   });
 
@@ -165,6 +175,7 @@ export function ModelsClient() {
         format: installed.format ?? "",
         quantization: installed.quantization ?? "",
         description: availableByName.get(installed.name)?.description ?? "",
+        isActive: installed.is_active,
       });
     }
 
@@ -181,6 +192,7 @@ export function ModelsClient() {
           format: candidate.format ?? "",
           quantization: candidate.quantization ?? "",
           description: candidate.description ?? "",
+          isActive: false,
         });
       } else {
         rows.push({
@@ -192,19 +204,19 @@ export function ModelsClient() {
       }
     }
 
-    const selectedModel = djInfoQuery.data?.active_model ?? "";
+    const loadedModel = models?.chat_llm_models.find((model) => model.is_active)?.name ?? "";
     const rowRank = (row: ChatLlmRow) => {
       if (row.state === "installed") return 0;
       if (row.state === "downloadable")
         return "model" in row && row.model.downloading ? 1 : 2;
       return 3;
     };
-    const isSelected = (row: ChatLlmRow) =>
-      row.state === "installed" && row.name === selectedModel;
+    const isLoaded = (row: ChatLlmRow) =>
+      row.state === "installed" && row.name === loadedModel;
 
     return rows.sort((a, b) => {
-      const selectedDelta = Number(isSelected(b)) - Number(isSelected(a));
-      if (selectedDelta !== 0) return selectedDelta;
+      const loadedDelta = Number(isLoaded(b)) - Number(isLoaded(a));
+      if (loadedDelta !== 0) return loadedDelta;
       const rankDelta = rowRank(a) - rowRank(b);
       if (rankDelta !== 0) return rankDelta;
       return a.name.localeCompare(b.name);
@@ -254,7 +266,7 @@ export function ModelsClient() {
 
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg">Chat LLM (AI DJ)</CardTitle>
+                  <CardTitle className="text-lg">Chat LLM</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {djInfoQuery.isLoading ? (
@@ -335,9 +347,8 @@ export function ModelsClient() {
                             );
                           }
 
-                          const isSelected =
-                            row.state === "installed" &&
-                            (djInfoQuery.data?.active_model ?? "") === row.name;
+                          const isLoaded =
+                            row.state === "installed" && row.isActive;
                           const badgesModel = {
                             compatibility: row.compatibility,
                             quantization: row.quantization,
@@ -365,23 +376,23 @@ export function ModelsClient() {
                                 )}
                                 <ModelCompatibilityBadges model={badgesModel} />
                               </div>
-                              {row.state === "unsupported" ? null : isSelected ? (
+                              {row.state === "unsupported" ? null : isLoaded ? (
                                 <Button variant="outline" size="sm" className="pointer-events-none text-green-500 border-green-500/30">
-                                  Selected
+                                  Loaded
                                   <Check className="ml-1 h-3 w-3" />
                                 </Button>
                               ) : (
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => djSettingsMutation.mutate({ model: row.name })}
-                                  disabled={djSettingsMutation.isPending}
+                                  onClick={() => chatLlmSwitchMutation.mutate(row.name)}
+                                  disabled={chatLlmSwitchMutation.isPending}
                                 >
-                                  {djSettingsMutation.isPending &&
-                                    djSettingsMutation.variables?.model === row.name && (
+                                  {chatLlmSwitchMutation.isPending &&
+                                    chatLlmSwitchMutation.variables === row.name && (
                                       <Loader2 className="mr-1 h-3 w-3 animate-spin" />
                                     )}
-                                  Select
+                                  {models?.chat_llm_models.some((model) => model.is_active) ? "Switch" : "Load"}
                                 </Button>
                               )}
                             </div>

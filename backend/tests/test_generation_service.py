@@ -111,6 +111,7 @@ async def test_generate_normalizes_ace_params():
 
     result = await service.generate({
         "caption": "bright synth pop",
+        "instrumental": True,
         "audio_format": "unsupported",
         "vocal_language": "fr",
     })
@@ -120,3 +121,99 @@ async def test_generate_normalizes_ace_params():
     assert backend.last_generate_params["caption"] == "bright synth pop"
     assert backend.last_generate_params["audio_format"] == "flac"
     assert backend.last_generate_params["vocal_language"] == "en"
+    assert backend.last_generate_params["lyrics"] == ""
+
+
+@pytest.mark.asyncio
+async def test_generate_applies_lyrics_pipeline_before_backend(monkeypatch):
+    from bangers.services import generation as generation_module
+
+    service = GenerationService()
+    backend = _FakeBackend(ready=True)
+    service.backend = backend
+
+    async def fake_prepare(params: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
+        prepared = dict(params)
+        prepared["lyrics"] = "[verse]\nClean lyric"
+        return prepared
+
+    monkeypatch.setattr(generation_module, "prepare_generation_params", fake_prepare)
+
+    result = await service.generate({
+        "caption": "angry rock",
+        "lyrics": "raw lyric",
+        "instrumental": False,
+    })
+
+    assert result["success"] is True
+    assert backend.last_generate_params is not None
+    assert backend.last_generate_params["lyrics"] == "[verse]\nClean lyric"
+
+
+@pytest.mark.asyncio
+async def test_generate_does_not_trust_unverified_lyrics_prepared_flag(monkeypatch):
+    from bangers.services import generation as generation_module
+
+    service = GenerationService()
+    backend = _FakeBackend(ready=True)
+    service.backend = backend
+
+    async def fake_prepare(params: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
+        prepared = dict(params)
+        prepared["lyrics"] = "[verse]\nReviewed by guardrail"
+        return prepared
+
+    monkeypatch.setattr(generation_module, "prepare_generation_params", fake_prepare)
+
+    result = await service.generate(
+        {
+            "caption": "custom tab vocal song",
+            "lyrics": "[verse]\nRaw user lyric",
+            "instrumental": False,
+        },
+        lyrics_prepared=True,
+    )
+
+    assert result["success"] is True
+    assert backend.last_generate_params is not None
+    assert backend.last_generate_params["lyrics"] == "[verse]\nReviewed by guardrail"
+
+
+@pytest.mark.asyncio
+async def test_generate_strips_verified_lyrics_pipeline_marker_before_backend():
+    from bangers.services.lyrics_pipeline import (
+        LYRICS_PIPELINE_PREPARED_KEY,
+        mark_lyrics_pipeline_prepared,
+    )
+
+    service = GenerationService()
+    backend = _FakeBackend(ready=True)
+    service.backend = backend
+
+    params = mark_lyrics_pipeline_prepared({
+        "caption": "clean vocal",
+        "lyrics": "[verse]\nAlready reviewed",
+        "instrumental": False,
+    })
+
+    result = await service.generate(params, lyrics_prepared=True)
+
+    assert result["success"] is True
+    assert backend.last_generate_params is not None
+    assert backend.last_generate_params["lyrics"] == "[verse]\nAlready reviewed"
+    assert LYRICS_PIPELINE_PREPARED_KEY not in backend.last_generate_params
+
+
+@pytest.mark.asyncio
+async def test_generate_fails_closed_when_guardrail_llm_unavailable():
+    service = GenerationService()
+    service.backend = _FakeBackend(ready=True)
+
+    result = await service.generate({
+        "caption": "vocal pop",
+        "lyrics": "[verse]\nNeeds review",
+        "instrumental": False,
+    })
+
+    assert result["success"] is False
+    assert "Chat LLM" in result["error"]

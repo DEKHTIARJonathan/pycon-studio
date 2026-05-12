@@ -327,6 +327,21 @@ export default function SettingsPage() {
                   }}
                 />
               </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="lyrics-guardrails">Lyrics guardrails</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Reviews vocal lyrics with the loaded Chat LLM before music generation.
+                  </p>
+                </div>
+                <Switch
+                  id="lyrics-guardrails"
+                  checked={boolSetting("lyrics_guardrails_enabled", true)}
+                  onCheckedChange={(checked) =>
+                    settingsMutation.mutate({ lyrics_guardrails_enabled: checked ? "true" : "false" })
+                  }
+                />
+              </div>
             </div>
             <div className="mb-5 space-y-3 rounded-lg border border-border p-3">
               <div className="flex items-center justify-between gap-3">

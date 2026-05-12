@@ -80,7 +80,7 @@ export function RadioSettingsDialog({
         <DialogHeader>
           <DialogTitle>Radio Settings</DialogTitle>
           <DialogDescription>
-            Customize the system prompt that steers radio caption generation.
+            Customize the system prompt that steers radio caption and lyric generation.
           </DialogDescription>
         </DialogHeader>
 
@@ -92,12 +92,12 @@ export function RadioSettingsDialog({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
             <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-              <span className="text-muted-foreground">Caption LLM:</span>{" "}
-              {info.active_model ? (
-                <span className="font-medium">{info.active_model}</span>
+              <span className="text-muted-foreground">App Chat LLM:</span>{" "}
+              {info.loaded_model ? (
+                <span className="font-medium">{info.loaded_model}</span>
               ) : (
                 <span className="italic text-muted-foreground">
-                  none selected (radio uses caption templates)
+                  none loaded (radio uses caption templates)
                 </span>
               )}
               <span className="text-muted-foreground">

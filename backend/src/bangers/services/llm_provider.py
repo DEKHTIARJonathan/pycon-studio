@@ -25,6 +25,10 @@ from bangers.model_registry import CHAT_LLM_BY_NAME, chat_runtime_for
 class ChatRuntime(ABC):
     """Loads and runs a chat LLM checkpoint."""
 
+    def loaded_model_name(self) -> str:
+        """Return the model currently resident in this runtime, if any."""
+        return ""
+
     @abstractmethod
     async def is_available(self) -> bool:
         """Return True iff this runtime can load `model_name`."""
@@ -80,6 +84,9 @@ class MLXChatRuntime(ChatRuntime):
             return False
         config = self._chat_llm_dir / model_name / "config.json"
         return config.exists()
+
+    def loaded_model_name(self) -> str:
+        return self._loaded_model_name if self._model is not None else ""
 
     async def is_available(self) -> bool:
         return self.runtime_supported()
@@ -192,6 +199,9 @@ class TransformersChatRuntime(ChatRuntime):
             return False
         config = self._chat_llm_dir / model_name / "config.json"
         return config.exists()
+
+    def loaded_model_name(self) -> str:
+        return self._loaded_model_name if self._model is not None else ""
 
     async def is_available(self) -> bool:
         return self.runtime_supported()
@@ -339,3 +349,12 @@ def installed_chat_models() -> list[str]:
             continue
         found.append(name)
     return found
+
+
+def loaded_chat_model_name() -> str:
+    """Return the Chat LLM currently loaded in memory, if any."""
+    for runtime in (_mlx_runtime, _transformers_runtime):
+        loaded = runtime.loaded_model_name()
+        if loaded:
+            return loaded
+    return ""

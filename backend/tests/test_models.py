@@ -150,3 +150,67 @@ async def test_unknown_model_download_is_rejected(client):
     )
     assert response.status_code == 400
     assert "Unknown model" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_switch_chat_llm_loads_and_persists_model(client, monkeypatch):
+    from bangers.db.connection import get_db
+    from bangers.routers import models as models_router
+
+    calls: list[str] = []
+
+    async def fake_switch(model_name: str) -> None:
+        calls.append(model_name)
+        db = await get_db()
+        await db.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) "
+            "VALUES ('dj_model', ?, datetime('now'))",
+            (model_name,),
+        )
+        await db.commit()
+
+    monkeypatch.setattr(models_router, "switch_chat_model", fake_switch)
+
+    response = await client.post(
+        "/api/models/switch-chat-llm",
+        json={"model_name": "Qwen3-1.7B"},
+    )
+
+    assert response.status_code == 200
+    assert calls == ["Qwen3-1.7B"]
+
+    db = await get_db()
+    cursor = await db.execute("SELECT value FROM settings WHERE key = 'dj_model'")
+    row = await cursor.fetchone()
+    assert row["value"] == "Qwen3-1.7B"
+
+
+@pytest.mark.asyncio
+async def test_chat_llm_active_status_uses_loaded_runtime_not_persisted_setting(client, monkeypatch):
+    from bangers.config import settings
+    from bangers.db.connection import get_db
+    from bangers.routers import models as models_router
+
+    chat_dir = settings.MODEL_CACHE_DIR / "chat-llm" / "Qwen3-1.7B"
+    chat_dir.mkdir(parents=True)
+    (chat_dir / "config.json").write_text("{}", encoding="utf-8")
+
+    db = await get_db()
+    await db.execute(
+        "INSERT OR REPLACE INTO settings (key, value, updated_at) "
+        "VALUES ('dj_model', 'Qwen3-1.7B', datetime('now'))"
+    )
+    await db.commit()
+
+    monkeypatch.setattr(models_router, "get_loaded_chat_model_name", lambda: "")
+    response = await client.get("/api/models")
+    assert response.status_code == 200
+    chat_models = response.json()["chat_llm_models"]
+    assert chat_models[0]["name"] == "Qwen3-1.7B"
+    assert chat_models[0]["is_active"] is False
+
+    monkeypatch.setattr(models_router, "get_loaded_chat_model_name", lambda: "Qwen3-1.7B")
+    response = await client.get("/api/models")
+    assert response.status_code == 200
+    chat_models = response.json()["chat_llm_models"]
+    assert chat_models[0]["is_active"] is True

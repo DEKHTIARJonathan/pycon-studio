@@ -318,6 +318,7 @@ export interface UpdateStationRequest {
 // Radio LLM settings types
 export interface RadioSettingsResponse {
   active_model: string;
+  loaded_model?: string;
   installed_models: string[];
   system_prompt: string;
   default_system_prompt: string;
@@ -366,6 +367,7 @@ export interface DJConversationDetailResponse extends DJConversationResponse {
 
 export interface DJInfoResponse {
   active_model: string;
+  loaded_model?: string;
   installed_models: string[];
   system_prompt: string;
   default_system_prompt: string;

@@ -17,6 +17,7 @@ import {
   decodeAndCacheAudio,
 } from "@/lib/audio/radio-helpers";
 import { useGpuStore } from "@/stores/gpu-store";
+import { toast } from "sonner";
 import type { SongResponse } from "@/types/api";
 
 // Monotonically increasing session counter. Each startStation call gets a new
@@ -71,6 +72,16 @@ export function useRadio() {
       try {
         const result1 = await generateNextTrack(stationId, signal);
         if (session !== _activeSession) return; // cancelled
+
+        if (!result1.success || !result1.song) {
+          toast.error("Radio generation failed", {
+            description: result1.error ?? "Unknown error",
+          });
+          radioEngine.stop();
+          useRadioStore.getState().stopStation();
+          usePlayerStore.setState({ isPlaying: false });
+          return;
+        }
 
         if (result1.success && result1.song) {
           const song1 = result1.song as SongResponse;

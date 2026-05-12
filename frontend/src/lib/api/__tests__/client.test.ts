@@ -74,6 +74,24 @@ describe("api client", () => {
     );
   });
 
+  it("switchChatLlmModel loads model through switch endpoint", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ message: "Chat LLM loaded: Qwen3-1.7B" }),
+    });
+
+    const { switchChatLlmModel } = await import("../client");
+    await switchChatLlmModel("Qwen3-1.7B");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/api/models/switch-chat-llm",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ model_name: "Qwen3-1.7B" }),
+      }),
+    );
+  });
+
   it("fetchSongs builds correct query string", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
