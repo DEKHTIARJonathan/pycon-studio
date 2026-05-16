@@ -5,6 +5,7 @@ import os
 import argparse
 import csv
 import errno
+import json
 import re
 import signal
 import subprocess
@@ -596,6 +597,11 @@ def _remote_worker_root(env: dict[str, str]) -> str:
     return env.get("BANGERS_REMOTE_PROJECT_ROOT", str(ROOT)).strip() or str(ROOT)
 
 
+def _remote_worker_sync_enabled(env: dict[str, str]) -> bool:
+    value = env.get("BANGERS_REMOTE_WORKER_SYNC", "true").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
 def _remote_worker_specs(env: dict[str, str], configured_urls: list[str]) -> list[RemoteWorkerSpec]:
     if not _remote_worker_autostart_enabled(env):
         return []
@@ -620,8 +626,52 @@ def _remote_worker_specs(env: dict[str, str], configured_urls: list[str]) -> lis
     return specs
 
 
-def _shell_env(exports: dict[str, str]) -> str:
-    return " ".join(f"{key}={shlex.quote(value)}" for key, value in exports.items())
+def _sync_remote_project(spec: RemoteWorkerSpec) -> None:
+    if shutil.which("rsync") is None:
+        raise RuntimeError("rsync is required for remote worker source sync")
+    target = f"{spec.ssh_host}:{spec.root.rstrip('/')}/"
+    subprocess.run(
+        [
+            "rsync",
+            "-az",
+            "--exclude", ".git/",
+            "--exclude", ".env",
+            "--exclude", ".env.*",
+            "--exclude", ".cache/",
+            "--exclude", "runtime.log",
+            "--exclude", "backend/.conda/",
+            "--exclude", "backend/data/",
+            "--exclude", "frontend/node_modules/",
+            "--exclude", "frontend/.next/",
+            "--exclude", "node_modules/",
+            str(ROOT) + "/",
+            target,
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+
+
+def _shell_export_lines(exports: dict[str, str]) -> str:
+    return "\n".join(f"export {key}={shlex.quote(value)}" for key, value in exports.items())
+
+
+def _read_startup_model_settings(env: dict[str, str]) -> dict[str, str]:
+    import sqlite3
+
+    db_path = Path(env.get("BANGERS_DATA_DIR", str(DEFAULT_DATA_DIR))) / "conda-install-bangers.db"
+    if not db_path.exists():
+        return {}
+    keys = ("dit_model", "lm_model", "lm_backend", "dj_model")
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            rows = conn.execute(
+                f"SELECT key, value FROM settings WHERE key IN ({','.join('?' for _ in keys)})",
+                keys,
+            ).fetchall()
+    except sqlite3.Error:
+        return {}
+    return {str(key): str(value) for key, value in rows if value is not None}
 
 
 def _remote_worker_command(
@@ -630,6 +680,7 @@ def _remote_worker_command(
     capabilities: str,
     token: str,
     timeout_seconds: str,
+    startup_model_settings: dict[str, str],
 ) -> list[str]:
     root = spec.root.rstrip("/")
     backend_dir = f"{root}/backend"
@@ -653,9 +704,14 @@ def _remote_worker_command(
         "HF_HUB_CACHE": f"{model_cache_dir}/huggingface/hub",
         "CONDA_PREFIX": f"{backend_dir}/.conda",
         "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
+        "BANGERS_STARTUP_MODEL_SETTINGS_JSON": json.dumps(
+            startup_model_settings,
+            separators=(",", ":"),
+        ),
     }
     if os.environ.get("CUDA_VISIBLE_DEVICES"):
         env["CUDA_VISIBLE_DEVICES"] = os.environ["CUDA_VISIBLE_DEVICES"]
+    export_lines = _shell_export_lines(env)
 
     remote_script = f"""
 set -eu
@@ -665,6 +721,33 @@ if [ ! -x {shlex.quote(entrypoint)} ]; then
   echo "Remote worker entrypoint missing: {entrypoint}" >&2
   exit 127
 fi
+{export_lines}
+python - <<'PY'
+import json
+import os
+import sqlite3
+
+data_dir = os.environ["BANGERS_DATA_DIR"]
+settings = json.loads(os.environ.get("BANGERS_STARTUP_MODEL_SETTINGS_JSON") or "{{}}")
+if settings:
+    os.makedirs(data_dir, exist_ok=True)
+    db_path = os.path.join(data_dir, "conda-install-bangers.db")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings ("
+            "key TEXT PRIMARY KEY, "
+            "value TEXT NOT NULL, "
+            "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+            ")"
+        )
+        for key, value in settings.items():
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value, updated_at) "
+                "VALUES (?, ?, datetime('now'))",
+                (key, str(value)),
+            )
+        conn.commit()
+PY
 cleanup() {{
   if [ "${{worker_pid:-}}" ]; then
     kill "$worker_pid" 2>/dev/null || true
@@ -672,7 +755,7 @@ cleanup() {{
   fi
 }}
 trap cleanup INT TERM HUP EXIT
-{_shell_env(env)} {shlex.quote(entrypoint)} &
+{shlex.quote(entrypoint)} &
 worker_pid=$!
 wait "$worker_pid"
 """.strip()
@@ -721,6 +804,125 @@ def _stop_remote_worker(spec: RemoteWorkerSpec) -> None:
         )
     except (OSError, subprocess.SubprocessError):
         pass
+
+
+def _process_cmdline(pid: int) -> list[str]:
+    try:
+        raw = (Path("/proc") / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        return []
+    return [
+        part.decode("utf-8", errors="replace")
+        for part in raw.split(b"\0")
+        if part
+    ]
+
+
+def _process_cwd(pid: int) -> Path | None:
+    try:
+        return Path(os.readlink(Path("/proc") / str(pid) / "cwd")).resolve()
+    except OSError:
+        return None
+
+
+def _path_is_relative_to(path: Path | None, parent: Path) -> bool:
+    if path is None:
+        return False
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _stale_local_dev_pids() -> list[int]:
+    if sys.platform != "linux":
+        return []
+
+    current_pid = os.getpid()
+    root = ROOT.resolve()
+    frontend_dir = FRONTEND_DIR.resolve()
+    backend_entry = str(_conda_env_executable("conda-install-bangers"))
+    pids: list[int] = []
+
+    for proc_dir in Path("/proc").iterdir():
+        if not proc_dir.name.isdigit():
+            continue
+        pid = int(proc_dir.name)
+        if pid == current_pid:
+            continue
+        cmdline = _process_cmdline(pid)
+        if not cmdline:
+            continue
+        joined = " ".join(cmdline)
+        cwd = _process_cwd(pid)
+        in_project = _path_is_relative_to(cwd, root)
+        in_frontend = _path_is_relative_to(cwd, frontend_dir)
+
+        is_launcher = (
+            in_project
+            and Path(cmdline[0]).name.startswith("python")
+            and any(Path(arg).name == "start.py" for arg in cmdline[1:])
+        )
+        is_backend = backend_entry in joined or (in_project and "bangers.main" in joined)
+        is_remote_ssh = (
+            in_project
+            and Path(cmdline[0]).name == "ssh"
+            and "/backend/.conda/bin/conda-install-bangers" in joined
+        )
+        is_frontend = in_frontend and (
+            "next dev" in joined
+            or "next-server" in joined
+            or (Path(cmdline[0]).name in {"node", "pnpm"} and "next" in joined)
+        )
+
+        if is_launcher or is_backend or is_remote_ssh or is_frontend:
+            pids.append(pid)
+
+    return sorted(set(pids))
+
+
+def _signal_process_group_or_pid(pid: int, sig: signal.Signals) -> None:
+    try:
+        os.killpg(pid, sig)
+        return
+    except ProcessLookupError:
+        return
+    except OSError:
+        pass
+    try:
+        os.kill(pid, sig)
+    except ProcessLookupError:
+        return
+    except OSError:
+        pass
+
+
+def _pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+
+
+def _stop_stale_local_dev_processes() -> None:
+    pids = _stale_local_dev_pids()
+    if not pids:
+        return
+    log(
+        "Stopping stale local dev process(es): "
+        + ", ".join(str(pid) for pid in pids),
+        YELLOW,
+    )
+    for pid in pids:
+        _signal_process_group_or_pid(pid, signal.SIGTERM)
+    time.sleep(1)
+    for pid in pids:
+        if _pid_is_alive(pid):
+            _signal_process_group_or_pid(pid, signal.SIGKILL)
 
 
 def _explicit_distributed_role(env: dict[str, str]) -> str:
@@ -1014,12 +1216,19 @@ def main() -> None:
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, shutdown)
 
+    _stop_stale_local_dev_processes()
+
     worker_capabilities = runtime_env.get(
         "BANGERS_DEV_WORKER_CAPABILITIES",
         DEFAULT_LOCAL_WORKER_CAPABILITIES,
     )
+    startup_model_settings = _read_startup_model_settings(runtime_env)
+    sync_remote_workers = _remote_worker_sync_enabled(runtime_env)
 
     for spec in remote_worker_specs:
+        if sync_remote_workers:
+            log(f"Syncing source to remote worker {spec.ssh_host}...", YELLOW)
+            _sync_remote_project(spec)
         _stop_remote_worker(spec)
         remote_worker = _popen(
             _remote_worker_command(
@@ -1027,6 +1236,7 @@ def main() -> None:
                 capabilities=worker_capabilities,
                 token=runtime_env.get("BANGERS_WORKER_TOKEN", ""),
                 timeout_seconds=runtime_env.get("BANGERS_WORKER_TIMEOUT_SECONDS", "900"),
+                startup_model_settings=startup_model_settings,
             ),
             cwd=ROOT,
             env=runtime_env,
