@@ -423,6 +423,13 @@ async def switch_dit_model(request: SwitchModelRequest) -> dict[str, str]:
     )
     await db.commit()
 
+    if settings.delegates_to_workers:
+        try:
+            nodes = await distributed_cluster.switch_dit_model(request.model_name)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"message": f"DiT model switched to {request.model_name} on {', '.join(nodes)}"}
+
     generation_service._set_loading("dit", request.model_name)
     try:
         status, ok = await generation_service.initialize_dit(
@@ -455,6 +462,13 @@ async def switch_lm_model(request: SwitchModelRequest) -> dict[str, str]:
     )
     await db.commit()
 
+    if settings.delegates_to_workers:
+        try:
+            nodes = await distributed_cluster.switch_lm_model(request.model_name, runtime)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"message": f"LM model switched to {request.model_name} on {', '.join(nodes)}"}
+
     generation_service._set_loading("lm", request.model_name)
     try:
         status, ok = await generation_service.initialize_lm(
@@ -482,6 +496,21 @@ async def switch_chat_llm_model(request: SwitchModelRequest) -> dict[str, str]:
             status_code=400,
             detail=f"{model_name} requires MLX on macOS.",
         )
+
+    if settings.delegates_to_workers:
+        from bangers.db.connection import get_db
+
+        db = await get_db()
+        await db.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+            ("dj_model", model_name),
+        )
+        await db.commit()
+        try:
+            nodes = await distributed_cluster.switch_chat_llm_model(model_name)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"message": f"Chat LLM loaded on {', '.join(nodes)}"}
 
     try:
         await switch_chat_model(model_name)

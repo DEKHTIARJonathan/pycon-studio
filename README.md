@@ -204,7 +204,8 @@ pnpm dev                     # Starts on :3000
 
 ## Configuration
 
-Environment variables (all optional, sensible defaults provided):
+Environment variables (all optional, sensible defaults provided). `mise run dev`
+also loads a repo-root `.env` file before starting processes:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -222,10 +223,15 @@ Environment variables (all optional, sensible defaults provided):
 | `ACESTEP_PROJECT_ROOT` | `.cache/models` | Root model directory for checkpoints and chat LLMs |
 | `BANGERS_DISTRIBUTED_ROLE` | `standalone` | `standalone`, `coordinator`, or `worker` |
 | `BANGERS_NODE_ID` | hostname | Human-readable node name reported to coordinators |
-| `BANGERS_WORKERS` | empty | Comma-separated worker backend URLs used by a coordinator |
+| `BANGERS_WORKERS` | empty | Comma-separated remote worker backend URLs used by a coordinator; `mise run dev` also prepends automatic local GPU workers |
 | `BANGERS_WORKER_CAPABILITIES` | all on standalone/worker, empty on coordinator | Comma-separated local capabilities: `music`, `ace_lm`, `chat_llm` |
 | `BANGERS_WORKER_TOKEN` | empty | Optional shared token for coordinator-to-worker requests |
 | `BANGERS_WORKER_TIMEOUT_SECONDS` | `900` | Coordinator HTTP timeout for long worker jobs |
+| `BANGERS_DEV_GPU_MODE` | `workers` | `mise run dev` local GPU mode: `workers` starts one local worker per visible CUDA GPU; `standalone` uses the old single-backend path |
+| `BANGERS_DEV_WORKER_PORT_BASE` | backend port + 1 | First localhost port for automatic `mise run dev` GPU workers |
+| `BANGERS_DEV_WORKER_CAPABILITIES` | `music,ace_lm,chat_llm` | Capabilities assigned to automatic local GPU workers |
+| `BANGERS_REMOTE_WORKER_AUTOSTART` | `true` | SSH into `BANGERS_WORKERS` hosts from `mise run dev` and start remote worker backends |
+| `BANGERS_REMOTE_PROJECT_ROOT` | current repo path | Repo path to use on remote worker hosts |
 
 ### Two DGX Spark Inference Split
 

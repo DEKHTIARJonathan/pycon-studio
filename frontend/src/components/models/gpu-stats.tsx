@@ -6,6 +6,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchGpuStats } from "@/lib/api/client";
+import type { GpuDeviceStats } from "@/types/api";
+
+function shortLabel(gpu: GpuDeviceStats): string {
+  return (gpu.label || gpu.node_id || gpu.name || "GPU")
+    .replace(/^spark-/, "")
+    .replace(/-music$/, "")
+    .replace(/-lm-chat$/, "");
+}
+
+function pct(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "--";
+  return `${Math.round(value)}%`;
+}
 
 export function GpuStats() {
   const { data: stats, isLoading, isError } = useQuery({
@@ -48,7 +61,8 @@ export function GpuStats() {
     );
   }
 
-  const pct = stats.vram_percent ?? 0;
+  const vramPct = stats.vram_percent ?? 0;
+  const gpus = stats.gpus ?? [];
 
   return (
     <Card>
@@ -64,7 +78,26 @@ export function GpuStats() {
           <Badge variant="secondary">{stats.device || "unknown"}</Badge>
         </div>
 
-        {stats.vram_total_mb != null && (
+        {gpus.length > 0 ? (
+          <div className="space-y-2">
+            {gpus.map((gpu, index) => (
+              <div
+                key={gpu.uuid || `${gpu.node_id}-${index}`}
+                className="rounded-md border border-border p-2"
+              >
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <span className="min-w-0 truncate font-medium">{shortLabel(gpu)}</span>
+                  <span className="shrink-0 font-mono">
+                    {gpu.error ? "error" : pct(gpu.utilization_gpu_percent)}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {gpu.holder ? gpu.holder : gpu.busy ? "busy" : gpu.name || "idle"}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : stats.vram_total_mb != null ? (
           <>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">VRAM</span>
@@ -75,11 +108,11 @@ export function GpuStats() {
             <div className="h-2 overflow-hidden rounded-full bg-muted">
               <div
                 className="h-full rounded-full bg-primary transition-all duration-300"
-                style={{ width: `${pct}%` }}
+                style={{ width: `${vramPct}%` }}
               />
             </div>
           </>
-        )}
+        ) : null}
 
         {stats.vram_used_mb != null && stats.vram_total_mb == null && (
           <div className="flex items-center justify-between text-sm">

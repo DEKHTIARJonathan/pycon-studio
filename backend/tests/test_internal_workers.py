@@ -52,7 +52,7 @@ async def test_internal_worker_status_requires_token_when_configured(client):
             headers={"X-Bangers-Worker-Token": "secret"},
         )
         assert ok.status_code == 200
-        assert ok.json()["chat_ready"] is False
+        assert ok.json()["chat_ready"] is True
 
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(

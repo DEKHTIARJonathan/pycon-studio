@@ -176,6 +176,80 @@ class DistributedCluster:
         response.raise_for_status()
         return GpuStatsResponse.model_validate(response.json())
 
+    async def switch_dit_model(self, model_name: str) -> list[str]:
+        return await self._switch_model_on_workers(
+            capability=DISTRIBUTED_CAPABILITY_MUSIC,
+            endpoint="switch-dit",
+            payload={"model_name": model_name},
+            label="DiT",
+        )
+
+    async def switch_lm_model(self, model_name: str, runtime: str) -> list[str]:
+        return await self._switch_model_on_workers(
+            capability=DISTRIBUTED_CAPABILITY_ACE_LM,
+            endpoint="switch-lm",
+            payload={"model_name": model_name, "runtime": runtime},
+            label="ACE 5Hz LM",
+        )
+
+    async def switch_chat_llm_model(self, model_name: str) -> list[str]:
+        return await self._switch_model_on_workers(
+            capability=DISTRIBUTED_CAPABILITY_CHAT_LLM,
+            endpoint="switch-chat-llm",
+            payload={"model_name": model_name},
+            label="Chat LLM",
+        )
+
+    async def _switch_model_on_workers(
+        self,
+        *,
+        capability: str,
+        endpoint: str,
+        payload: dict[str, Any],
+        label: str,
+    ) -> list[str]:
+        if not self.enabled:
+            raise DistributedGenerationError("Distributed workers are not enabled")
+        workers = await self.refresh(force=True)
+        targets = [worker for worker in workers if worker.supports(capability)]
+        if not targets:
+            raise DistributedGenerationError(f"No remote {label} worker is configured")
+
+        async with await self._client() as client:
+            results = await asyncio.gather(
+                *(
+                    self._switch_worker_model(client, worker, endpoint, payload)
+                    for worker in targets
+                ),
+                return_exceptions=True,
+            )
+
+        loaded_nodes: list[str] = []
+        errors: list[str] = []
+        for worker, result in zip(targets, results):
+            node_id = worker.node_id or worker.url
+            if isinstance(result, BaseException):
+                errors.append(f"{node_id}: {result}")
+            else:
+                loaded_nodes.append(node_id)
+        if errors:
+            raise DistributedGenerationError("; ".join(errors))
+        await self.refresh(force=True)
+        return loaded_nodes
+
+    async def _switch_worker_model(
+        self,
+        client: httpx.AsyncClient,
+        worker: WorkerState,
+        endpoint: str,
+        payload: dict[str, Any],
+    ) -> None:
+        response = await client.post(
+            f"{worker.url}/api/internal/worker/models/{endpoint}",
+            json=payload,
+        )
+        response.raise_for_status()
+
     @staticmethod
     def _worker_gpu_stats_error(worker: WorkerState, error: str) -> GpuStatsResponse:
         node_id = worker.node_id or worker.url
