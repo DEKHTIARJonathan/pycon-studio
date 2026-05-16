@@ -385,7 +385,7 @@ class DJService:
             try:
                 from bangers.services.generation import generation_service
 
-                if generation_service.backend_ready:
+                if generation_service.backend_ready or settings.delegates_to_workers:
                     job_id = generation_service.create_job()
                     generation_job_id = job_id
 
@@ -445,14 +445,17 @@ class DJService:
         from bangers.services.gpu_lock import gpu_lock
         from bangers.ws.manager import generation_ws_manager
 
-        if gpu_lock.is_locked:
+        use_local_gpu_lock = not settings.delegates_to_workers
+
+        if use_local_gpu_lock and gpu_lock.is_locked:
             await generation_ws_manager.broadcast({
                 "type": "progress",
                 "job_id": job_id,
                 "progress": 0.0,
                 "stage": f"Waiting for GPU (in use by {gpu_lock.holder})...",
             })
-        await gpu_lock.await_acquire("dj")
+        if use_local_gpu_lock:
+            await gpu_lock.await_acquire("dj")
 
         started_at = datetime.now(timezone.utc)
         history_id = job_id  # Same ID so DJ messages can link to history
@@ -484,9 +487,10 @@ class DJService:
                 params["dj_model"] = dj_model
 
             if hasattr(generation_service, "prepare_params"):
+                allow_holders = frozenset({"dj"}) if use_local_gpu_lock else None
                 params = await generation_service.prepare_params(
                     params,
-                    allow_holders=frozenset({"dj"}),
+                    allow_holders=allow_holders,
                 )
 
             # Insert generation history record
@@ -523,9 +527,10 @@ class DJService:
                 if title_caption:
                     try:
                         from bangers.services.title_generator import generate_song_title
+                        allow_holders = frozenset({"dj"}) if use_local_gpu_lock else None
                         generated_title = await generate_song_title(
                             title_caption, "", "", "DJ Generation",
-                            allow_holders=frozenset({"dj"}),
+                            allow_holders=allow_holders,
                         )
                     except Exception as e:
                         logger.debug(f"DJ title generation failed: {e}")
@@ -607,7 +612,8 @@ class DJService:
             except Exception:
                 pass
         finally:
-            await gpu_lock.release("dj")
+            if use_local_gpu_lock:
+                await gpu_lock.release("dj")
 
         if deferred_title_caption:
             from bangers.services.deferred_titles import schedule_history_title_retry
