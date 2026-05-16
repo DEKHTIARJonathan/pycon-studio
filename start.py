@@ -5,6 +5,7 @@ import os
 import argparse
 import csv
 import errno
+import re
 import signal
 import subprocess
 import sys
@@ -342,6 +343,7 @@ def _popen(cmd: list[str], **kwargs) -> subprocess.Popen:
     """Open a subprocess, using shell=True on Windows so .cmd wrappers are found."""
     if sys.platform == "win32":
         return subprocess.Popen(cmd, shell=True, **kwargs)
+    kwargs.setdefault("start_new_session", True)
     if _RUNTIME_LOG_HANDLE is None:
         return subprocess.Popen(cmd, **kwargs)
 
@@ -685,6 +687,42 @@ wait "$worker_pid"
     ]
 
 
+def _remote_worker_cleanup_command(spec: RemoteWorkerSpec) -> list[str]:
+    root = spec.root.rstrip("/")
+    entrypoint = f"{root}/backend/.conda/bin/conda-install-bangers"
+    pattern = re.escape(entrypoint).replace(
+        "conda\\-install\\-bangers",
+        "[c]onda\\-install\\-bangers",
+    )
+    remote_script = f"""
+set +e
+pkill -TERM -f {shlex.quote(pattern)} 2>/dev/null
+sleep 1
+pkill -KILL -f {shlex.quote(pattern)} 2>/dev/null
+exit 0
+""".strip()
+    return [
+        "ssh",
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=5",
+        spec.ssh_host,
+        remote_script,
+    ]
+
+
+def _stop_remote_worker(spec: RemoteWorkerSpec) -> None:
+    try:
+        subprocess.run(
+            _remote_worker_cleanup_command(spec),
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def _explicit_distributed_role(env: dict[str, str]) -> str:
     return env.get("BANGERS_DISTRIBUTED_ROLE", "").strip().lower()
 
@@ -939,28 +977,42 @@ def main() -> None:
 
     procs: list[tuple[str, subprocess.Popen]] = []
 
+    def terminate_process(proc: subprocess.Popen, *, force: bool = False) -> None:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                capture_output=True,
+            )
+            return
+        sig = signal.SIGKILL if force else signal.SIGTERM
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            return
+        except OSError:
+            if force:
+                proc.kill()
+            else:
+                proc.terminate()
+
     def shutdown(sig=None, frame=None):
         print()
         log("Shutting down...")
+        for spec in remote_worker_specs:
+            _stop_remote_worker(spec)
         for _name, p in procs:
-            if sys.platform == "win32":
-                # shell=True means p.terminate() only kills cmd.exe, not the
-                # child process tree.  taskkill /T /F kills the entire tree.
-                subprocess.run(
-                    ["taskkill", "/T", "/F", "/PID", str(p.pid)],
-                    capture_output=True,
-                )
-            else:
-                p.terminate()
+            terminate_process(p)
         for _name, p in procs:
             try:
                 p.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                p.kill()
+                terminate_process(p, force=True)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, shutdown)
 
     worker_capabilities = runtime_env.get(
         "BANGERS_DEV_WORKER_CAPABILITIES",
@@ -968,6 +1020,7 @@ def main() -> None:
     )
 
     for spec in remote_worker_specs:
+        _stop_remote_worker(spec)
         remote_worker = _popen(
             _remote_worker_command(
                 spec,
