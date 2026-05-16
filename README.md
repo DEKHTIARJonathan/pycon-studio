@@ -14,205 +14,105 @@
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![ACE-Step](https://img.shields.io/badge/ACE--Step-1.5-purple?style=flat-square)
 
-Generate, remix, and manage AI music entirely on your own machine.
+Local AI Music Studio to Generate and remix music entirely on your own machine.
 Built on [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5).
 
-[Features](#features) · [Screenshots](#screenshots) · [Quick Start](#quick-start) · [Development](DEVELOPMENT.md) · [Deployment](DEPLOY.md) · [Configuration](#configuration) · [Credits](#credits--license)
+![screenshot](assets/screenshot.png)
 
 </div>
 
-## Screenshots
-
-<table>
-<tr>
-<td align="center"><strong>Create</strong></td>
-<td align="center"><strong>Models</strong></td>
-</tr>
-<tr>
-<td><img src="screenshots/create.png" alt="Create page — generate music from text" width="100%"></td>
-<td><img src="screenshots/models.png" alt="Models page — download and manage models" width="100%"></td>
-</tr>
-<tr>
-<td align="center"><sub>Generate music from text or full custom parameters</sub></td>
-<td align="center"><sub>One-click model downloads and management</sub></td>
-</tr>
-</table>
-
-## Features
-
-### Music Generation
-
-- **Text-to-Music (Simple Mode)** — describe what you want, get a song
-- **Custom Mode** — full control over caption, lyrics, BPM, key, and time signature
-- **Remix (Cover)** — upload or pick an existing song, transform it with AI
-- **AutoGen** — automatic batch generation with optional auto-save
-
-### AI DJ
-
-- **Conversational music generation** — chat naturally to describe what you want to hear
-- **Local chat LLMs** — runs MLX-quantized models on Apple Silicon and Transformers models elsewhere; the runtime is auto-selected from the model you pick
-- **Conversation history** — pick up where you left off with saved chat sessions
-- **Auto-titling** — conversations are automatically named based on content
-
-### Radio
-
-- **Jukebox mode** — continuous, hands-free music generation
-- **Station presets & custom stations** — create stations with specific genres, moods, and parameters
-- **Radio ambiance** — vinyl crackle, static, and brown noise effects for that analog feel
-
-### Library & Player
-
-- **Library** — browse, search, filter, rate, and organize your generated music
-- **Full Audio Player** — mini-player, full-screen overlay, queue, keyboard shortcuts
-
-### Models
-
-- **Model management** — one-click downloads, model switching, and status tracking from the Models page
-
-### Customization
-
-- **conda install bangers identity** — Long Beach night colors with cyan, pink, yellow, and maximum music energy
-- **GPU throttle tuning** — some tricks to minimize audio stuttering on Apple Silicon unified memory during continous generation
+Use it to generate, remix, save, and play AI music on your own machine. The app includes text-to-music, custom generation, remix mode, AI DJ chat, radio stations, a library, and a full audio player.
 
 ## Quick Start
 
 ### Prerequisites
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Python | 3.10+ launcher; backend uses conda Python 3.11 | [python.org](https://www.python.org/downloads/) |
-| conda | latest | `mise install`, [Miniforge](https://conda-forge.org/download/), or [Miniconda](https://docs.conda.io/projects/miniconda/) |
-| Node.js | 20+ | [nodejs.org](https://nodejs.org/) |
-| pnpm | 9+ | [pnpm.io](https://pnpm.io/installation) |
+- Git
+- [mise](https://mise.jdx.dev/) installed and activated in your shell
 
-### Clone & Run
+The repo pins Python 3.11, Node.js 20, pnpm 9.15.9, and conda in `.mise.toml`.
+
+### Run Locally
 
 ```bash
 git clone https://github.com/DEKHTIARJonathan/conda-install-bangers.git
 cd conda-install-bangers
-mise run setup
-mise run dev
-```
-
-That's it. The launcher:
-- Checks prerequisites (Python, conda, Node.js, pnpm)
-- Installs dependencies automatically on first run
-- Starts the backend (port 8000) and frontend (port 3000)
-- Opens your browser automatically once ready
-
-On first launch the app starts with **no models loaded**. Open the **Models** page in
-your browser to download and select the DiT model, language model, and chat LLM you
-want; your selection is persisted in the database and reloaded automatically on
-every restart.
-
-Make sure you have plenty of free disk space — model weights typically range from
-1 GB to 50 GB depending on what you pick.
-
-Press `Ctrl+C` to stop both servers.
-
-### Development with mise
-
-For daily development without rebuilding containers:
-
-```bash
 mise install
 mise run setup
 mise run dev
-mise run test
-# Reset local DB/audio/uploads while keeping downloaded models:
-mise run clean
 ```
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for local workflow, cache layout, and troubleshooting.
+The launcher starts:
 
-The repo enables mise's experimental conda backend in `.mise.toml` so `mise install`
-can install `conda` without a separate global `mise settings experimental=true`.
-The tool entry must use the backend-qualified form `"conda:conda" = "latest"`;
-bare `conda = "latest"` is resolved as a normal mise registry tool on some
-versions and fails with `conda not found in mise tool registry`.
+- backend: `https://localhost:8000`
+- frontend: `https://localhost:3000`
+- runtime data: `backend/data/`
+- model cache: `.cache/models/`
 
-### Production with Docker Compose
+The dev server uses a self-signed HTTPS certificate. Your browser will warn the first time; proceed to the local site. Press `Ctrl+C` to stop both servers.
 
-For an NVIDIA Linux production host:
+On first launch, no model is loaded. Open the **Models** page, download/select a DiT model, and optionally select an ACE language model and a chat LLM. Selections are stored in `backend/data/conda-install-bangers.db` and restored on restart.
+
+## Daily Commands
 
 ```bash
-cp .env.example .env
-docker compose build
-docker compose up -d
+mise run dev        # Start backend and frontend
+mise run test       # Run backend and frontend tests once
+mise run clean      # Reset local DB/audio/uploads, keep downloaded models
 ```
 
-See [DEPLOY.md](DEPLOY.md) for GPU prerequisites, persistent volumes, upgrades, backups, and reverse proxy notes.
-
-### Models & Hardware
-
-All models are downloaded and selected from the **Models** page. The app starts with
-no models loaded — pick whichever DiT (and optionally LM) fits your hardware and
-your selection persists across restarts.
-
-**DiT models** — turbo (recommended), turbo-shift1, turbo-shift3, turbo-continuous, sft (50-step), base (50-step)
-
-**Language models** — 1.7B, 0.6B (lightweight), 4B (best quality), or no LM at all
-
-Rough LM guidance by VRAM:
-
-| VRAM | Suggested LM | Notes |
-|------|--------------|-------|
-| ≤6 GB | none | DiT-only, no lyrics formatting |
-| 6-8 GB | 0.6B | Lightweight, separate download |
-| 8-16 GB | 1.7B | Full features |
-| 16-24 GB | 1.7B or 4B | Best quality with 4B |
-| ≥24 GB | 4B | Maximum quality |
-
-### Flags
+Launcher flags:
 
 ```bash
-python3 start.py --install   # Force reinstall all dependencies
-python3 start.py --no-open   # Don't auto-open browser
+python start.py --install   # Force dependency reinstall
+python start.py --no-open   # Do not auto-open the browser
 ```
 
-### Updating
+After pulling updates:
 
 ```bash
 git pull
-python3 start.py        # macOS / Linux
-python start.py         # Windows
+mise run setup
+mise run dev
 ```
 
-The launcher automatically detects dependency changes after `git pull` and reinstalls as needed — including CUDA PyTorch on Windows.
+## Models
 
-To force a full reinstall: `python3 start.py --install`
+All downloads and active selections happen in the **Models** page. Model selection is intentionally not controlled by environment variables.
 
-<details>
-<summary><strong>Manual Setup</strong></summary>
+Current ACE model registry:
 
-If you prefer to run things separately:
+| Type | Models |
+|------|--------|
+| DiT | `acestep-v15-turbo`, `acestep-v15-base`, `acestep-v15-sft`, `acestep-v15-turbo-continuous`, `acestep-v15-xl-turbo` |
+| ACE language model | `acestep-5Hz-lm-1.7B`, `acestep-5Hz-lm-0.6B`, `acestep-5Hz-lm-4B`, or no LM |
+| Chat LLM, MLX | `Qwen3-0.6B-4bit`, `Qwen3-1.7B-4bit`, `Qwen3-4B-4bit`, `Qwen3-8B-4bit` |
+| Chat LLM, Transformers | `Qwen3-1.7B`, `Qwen3-4B-Instruct-2507`, `Qwen3-8B-FP8`, `Qwen3-14B-FP8`, `Qwen3-30B-A3B-Instruct-2507-FP8` |
 
-```bash
-# Backend
-cd backend
-conda env create --prefix .conda --file environment.yml
-conda run --prefix .conda python -m pip install --prefer-binary --extra-index-url https://download.pytorch.org/whl/cu130 -e '.[dev]'
-conda run --prefix .conda conda-install-bangers  # Starts on :8000
+Disk usage depends on what you download. The default ACE bundle is about 10 GB, the XL DiT is about 20 GB, and larger chat LLMs add more.
 
-# Frontend (separate terminal)
-cd frontend
-pnpm install
-pnpm dev                     # Starts on :3000
-```
+Rough ACE LM guidance:
 
-</details>
+| VRAM | Suggested LM |
+|------|--------------|
+| <=6 GB | none |
+| 6-8 GB | `acestep-5Hz-lm-0.6B` |
+| 8-16 GB | `acestep-5Hz-lm-1.7B` |
+| 16-24 GB | `acestep-5Hz-lm-1.7B` or `acestep-5Hz-lm-4B` |
+| >=24 GB | `acestep-5Hz-lm-4B` |
 
 ## Configuration
 
 Environment variables (all optional, sensible defaults provided). `mise run dev`
 also loads a repo-root `.env` file before starting processes:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
 | `BANGERS_HOST` | `0.0.0.0` | Backend bind address |
 | `BANGERS_PORT` | `8000` | Backend port |
-| `BANGERS_DEVICE` | `auto` | GPU device (`auto`, `cuda`, `mps`, `cpu`) |
-| `BANGERS_LM_BACKEND` | `mlx` on macOS, `nano-vllm` on Linux | LM backend |
+| `BANGERS_DEVICE` | `auto` | `auto`, `cuda`, `mps`, or `cpu` |
+| `BANGERS_LM_BACKEND` | `mlx` on macOS, `nano-vllm` elsewhere | ACE LM backend |
 | `BANGERS_AUDIO_FORMAT` | `flac` | Default output format |
 | `BANGERS_BATCH_SIZE` | `2` | Number of samples per generation batch |
 | `BANGERS_INFERENCE_STEPS` | `8` | Default DiT inference steps |
@@ -271,86 +171,40 @@ The coordinator keeps the UI, database, history, uploads, and copied audio artif
 | `←` / `→` | Seek backward / forward |
 
 ## Project Structure
+| `BANGERS_BATCH_SIZE` | `2` | Default samples per generation |
+| `BANGERS_INFERENCE_STEPS` | `8` | Default DiT steps |
+| `BANGERS_GUIDANCE_SCALE` | `7.0` | Default guidance scale |
+| `BANGERS_THINKING` | `true` | Default 5 Hz LM thinking mode |
+| `BANGERS_DATA_DIR` | `backend/data` | SQLite DB, audio, uploads |
+| `BANGERS_MODEL_CACHE_DIR` | `.cache/models` | Model/cache root |
+| `ACESTEP_PROJECT_ROOT` | `.cache/models` | ACE checkpoints and chat LLM root |
 
-```
-conda-install-bangers/
-├── start.py                  # One-command launcher
-├── compose.yaml              # Production Docker Compose stack
-├── docker/                   # Backend and frontend Dockerfiles
-├── DEVELOPMENT.md            # Local development workflow
-├── DEPLOY.md                 # Production deployment workflow
-├── backend/                  # Python — FastAPI + SQLite + ACE-Step
-│   ├── src/bangers/
-│   │   ├── main.py           # App entry, CORS, routers
-│   │   ├── config.py         # Environment settings
-│   │   ├── ace_handler.py    # BangersHandler (checkpoint resolution)
-│   │   ├── backends/         # ACE-Step music generation backend
-│   │   ├── db/               # SQLite schema, connection, indexes
-│   │   ├── routers/          # REST + WebSocket endpoints
-│   │   │   ├── generation.py # Music generation
-│   │   │   ├── dj.py         # AI DJ chat
-│   │   │   ├── radio.py      # Radio stations
-│   │   │   └── ...           # Songs, models, uploads, history, etc.
-│   │   ├── services/         # Generation, DJ, radio, chat-LLM runtime
-│   │   ├── models/           # Pydantic request/response schemas
-│   │   └── ws/               # WebSocket handlers
-│   ├── data/                 # Runtime data (gitignored)
-│   │   ├── audio/            # Generated music files
-│   │   └── uploads/          # Uploaded source audio
-│   └── tests/                # pytest + httpx
-├── .cache/models/    # Persistent model cache (gitignored)
-│   ├── checkpoints/          # ACE-Step model weights
-│   ├── chat-llm/             # Local chat LLM weights
-├── frontend/                 # TypeScript — Next.js + React 19
-│   └── src/
-│       ├── app/              # Page routes (create, dj, radio, library, etc.)
-│       ├── components/       # UI components by feature
-│       │   ├── create/       # Music generation forms
-│       │   ├── dj/           # AI DJ chat interface
-│       │   ├── radio/        # Radio station player
-│       │   ├── settings/     # Settings
-│       │   └── ...           # Library, models, layout
-│       ├── hooks/            # Custom React hooks
-│       ├── stores/           # Zustand state management
-│       ├── themes/           # bangers theme tokens
-│       ├── lib/              # API client, utilities, audio helpers
-│       └── types/            # TypeScript interfaces
-├── screenshots/              # README screenshots
-└── LICENSE
+Most generation defaults can also be changed in the app under **Settings**.
+
+## Production
+
+The current Docker Compose stack targets a single NVIDIA Linux host and serves HTTP:
+
+```bash
+cp .env.example .env
+docker compose build
+docker compose up -d
 ```
 
-## Tech Stack
+Open `http://localhost:3000`.
 
-<table>
-<tr>
-<td valign="top"><strong>Backend</strong></td>
-<td valign="top"><strong>Frontend</strong></td>
-</tr>
-<tr>
-<td valign="top">
+Compose uses two named volumes:
 
-- [FastAPI](https://fastapi.tiangolo.com/) — async API
-- [SQLite](https://www.sqlite.org/) — WAL mode, optimized
-- [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5) — music generation
-- [uvicorn](https://www.uvicorn.org/) — ASGI server
+- `bangers-data`: SQLite DB, generated audio, uploads
+- `bangers-models`: model weights and Hugging Face cache
 
-</td>
-<td valign="top">
+See [DEPLOY.md](DEPLOY.md) for GPU prerequisites, upgrades, backups, and failure checks.
 
-- [Next.js 16](https://nextjs.org/) — React framework
-- [React 19](https://react.dev/) — UI library
-- [Tailwind CSS v4](https://tailwindcss.com/) — styling
-- [Radix UI](https://www.radix-ui.com/) — accessible components
-- [Zustand](https://zustand-demo.pmnd.rs/) — state management
-- [TanStack Query](https://tanstack.com/query) — data fetching
-- [WaveSurfer.js](https://wavesurfer.xyz/) — audio visualization
-- [Motion](https://motion.dev/) — animations
+## Development
 
-</td>
-</tr>
-</table>
+See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, TLS behavior, cache paths, and test commands.
 
-## Running Tests
+Run tests:
 
 ```bash
 mise run test
@@ -359,19 +213,12 @@ mise run test
 Or run each side directly:
 
 ```bash
-# Backend
-cd backend && conda run --prefix .conda pytest -v
-
-# Frontend
-cd frontend && pnpm exec vitest --run
+(cd backend && conda run --prefix .conda pytest -v)
+pnpm --dir frontend exec vitest --run
 ```
 
-## Credits & License
+## Credits and License
 
-conda install bangers is built on top of [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5).
-
-Community inspirations:
-- **AI DJ** — inspired by [clockworksquirrel/ace-step-apple-silicon](https://github.com/clockworksquirrel/ace-step-apple-silicon)
-- **Radio** — inspired by [nalexand/ACE-Step-1.5-OPTIMIZED](https://github.com/nalexand/ACE-Step-1.5-OPTIMIZED) and [PasiKoodaa/ACE-Step-RADIO](https://github.com/PasiKoodaa/ACE-Step-RADIO)
+Built on [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5). See [ATTRIBUTION.md](ATTRIBUTION.md) for community inspirations.
 
 Licensed under the [MIT License](LICENSE).

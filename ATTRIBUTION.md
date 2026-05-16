@@ -1,17 +1,8 @@
 # Attribution
 
-`conda install bangers` includes features and designs inspired by the ACE-Step community:
+`conda install bangers` builds on ACE-Step and community work:
 
-- **NextJS AI Studio** — Based on the initial design from
-  [proximasan/tadpole-studio](https://github.com/https://github.com/proximasan/tadpole-studio)
-  (NextJS AI Studio).
-
-- **Radio Stations / MusicBox** — Inspired by
-  [nalexand/ACE-Step-1.5-OPTIMIZED](https://github.com/nalexand/ACE-Step-1.5-OPTIMIZED)
-  (MusicBox jukebox) and
-  [PasiKoodaa/ACE-Step-RADIO](https://github.com/PasiKoodaa/ACE-Step-RADIO)
-  (radio station mode with memory optimization).
-
-- **AI DJ Chat** — Inspired by
-  [clockworksquirrel/ace-step-apple-silicon](https://github.com/clockworksquirrel/ace-step-apple-silicon)
-  (conversational AI DJ interface).
+- [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5): music generation backend.
+- [proximasan/tadpole-studio](https://github.com/proximasan/tadpole-studio): initial Next.js AI Studio inspiration.
+- [nalexand/ACE-Step-1.5-OPTIMIZED](https://github.com/nalexand/ACE-Step-1.5-OPTIMIZED) and [PasiKoodaa/ACE-Step-RADIO](https://github.com/PasiKoodaa/ACE-Step-RADIO): radio and jukebox inspiration.
+- [clockworksquirrel/ace-step-apple-silicon](https://github.com/clockworksquirrel/ace-step-apple-silicon): conversational AI DJ inspiration.
