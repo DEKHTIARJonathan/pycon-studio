@@ -103,7 +103,8 @@ Rough ACE LM guidance:
 
 ## Configuration
 
-Common environment variables:
+Environment variables (all optional, sensible defaults provided). `mise run dev`
+also loads a repo-root `.env` file before starting processes:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -121,7 +122,7 @@ Common environment variables:
 | `ACESTEP_PROJECT_ROOT` | `.cache/models` | ACE checkpoints and chat LLM root |
 | `BANGERS_DISTRIBUTED_ROLE` | `standalone` | `standalone`, `coordinator`, or `worker` |
 | `BANGERS_NODE_ID` | hostname | Human-readable node name reported to coordinators |
-| `BANGERS_WORKERS` | empty | Comma-separated worker backend URLs used by a coordinator |
+| `BANGERS_WORKERS` | empty | Comma-separated remote worker backend URLs used by a coordinator; `mise run dev` also prepends automatic local GPU workers |
 | `BANGERS_WORKER_CAPABILITIES` | all on standalone/worker, empty on coordinator | Comma-separated local capabilities: `music`, `ace_lm`, `chat_llm` |
 | `BANGERS_WORKER_TOKEN` | empty | Optional shared token for coordinator-to-worker requests |
 | `BANGERS_WORKER_TIMEOUT_SECONDS` | `900` | Coordinator HTTP timeout for long worker jobs |

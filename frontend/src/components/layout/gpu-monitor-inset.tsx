@@ -67,7 +67,7 @@ export function GpuMonitorInset({ hasMiniPlayer }: GpuMonitorInsetProps) {
     refetchIntervalInBackground: true,
   });
 
-  const gpus = fallbackGpus(data).slice(0, 2);
+  const gpus = fallbackGpus(data);
   const hasData = gpus.length > 0;
   const hasGpuError = gpus.some((gpu) => gpu.error);
   const statusLabel = isLoading && !hasData

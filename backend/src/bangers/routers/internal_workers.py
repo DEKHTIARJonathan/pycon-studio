@@ -13,11 +13,17 @@ from bangers.config import (
     DISTRIBUTED_CAPABILITY_MUSIC,
     settings,
 )
+from bangers.db.connection import get_db
 from bangers.services.generation import generation_service
-from bangers.services.chat_llm import get_loaded_chat_model_name
+from bangers.services.chat_llm import (
+    ChatLlmUnavailable,
+    get_loaded_chat_model_name,
+    switch_chat_model,
+)
+from bangers.services.llm_provider import ChatRuntimeBusy
 from bangers.services.gpu_stats import read_local_gpu_stats
 from bangers.services.gpu_lock import gpu_lock
-from bangers.models.common import GpuStatsResponse
+from bangers.models.common import GpuStatsResponse, SwitchModelRequest
 
 
 router = APIRouter(prefix="/internal/worker", tags=["internal-worker"])
@@ -147,7 +153,6 @@ async def worker_status(
     chat_llm_model = get_loaded_chat_model_name()
     chat_ready = (
         DISTRIBUTED_CAPABILITY_CHAT_LLM in capabilities
-        and bool(chat_llm_model)
     )
     ready = bool(capabilities)
     if DISTRIBUTED_CAPABILITY_MUSIC in capabilities:
@@ -187,6 +192,92 @@ async def worker_gpu_stats(
         busy=gpu_lock.is_locked,
         holder=gpu_lock.holder,
     )
+
+
+async def _persist_setting(key: str, value: str) -> None:
+    db = await get_db()
+    await db.execute(
+        "INSERT OR REPLACE INTO settings (key, value, updated_at) "
+        "VALUES (?, ?, datetime('now'))",
+        (key, value),
+    )
+    await db.commit()
+
+
+@router.post("/models/switch-dit")
+async def switch_worker_dit_model(
+    request: SwitchModelRequest,
+    x_bangers_worker_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    _check_worker_token(x_bangers_worker_token)
+    if DISTRIBUTED_CAPABILITY_MUSIC not in settings.DISTRIBUTED_CAPABILITIES:
+        raise HTTPException(status_code=409, detail="This worker does not advertise music capability")
+    await _persist_setting("dit_model", request.model_name)
+    generation_service._set_loading("dit", request.model_name)
+    try:
+        status, ok = await generation_service.initialize_dit(
+            config_path=request.model_name,
+            device=generation_service.device or settings.DEFAULT_DEVICE,
+        )
+    finally:
+        generation_service._clear_loading()
+    if not ok:
+        raise HTTPException(status_code=500, detail=status)
+    return {"message": f"DiT model loaded on {settings.DISTRIBUTED_NODE_ID}"}
+
+
+@router.post("/models/switch-lm")
+async def switch_worker_lm_model(
+    request: SwitchModelRequest,
+    x_bangers_worker_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    _check_worker_token(x_bangers_worker_token)
+    if DISTRIBUTED_CAPABILITY_ACE_LM not in settings.DISTRIBUTED_CAPABILITIES:
+        raise HTTPException(status_code=409, detail="This worker does not advertise ACE LM capability")
+    runtime = request.runtime or settings.DEFAULT_LM_BACKEND
+    await _persist_setting("lm_model", request.model_name)
+    await _persist_setting("lm_backend", runtime)
+    generation_service._set_loading("lm", request.model_name)
+    try:
+        status, ok = await generation_service.initialize_lm(
+            lm_model_path=request.model_name,
+            backend=runtime,
+            device=generation_service.device or settings.DEFAULT_DEVICE,
+        )
+    finally:
+        generation_service._clear_loading()
+    if not ok:
+        raise HTTPException(status_code=500, detail=status)
+    return {"message": f"LM model loaded on {settings.DISTRIBUTED_NODE_ID}"}
+
+
+@router.post("/models/switch-chat-llm")
+async def switch_worker_chat_llm_model(
+    request: SwitchModelRequest,
+    x_bangers_worker_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    _check_worker_token(x_bangers_worker_token)
+    if DISTRIBUTED_CAPABILITY_CHAT_LLM not in settings.DISTRIBUTED_CAPABILITIES:
+        raise HTTPException(status_code=409, detail="This worker does not advertise chat LLM capability")
+    try:
+        await switch_chat_model(request.model_name)
+    except ChatRuntimeBusy as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "chat_llm_busy", "message": str(exc)},
+        ) from exc
+    except ChatLlmUnavailable as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "chat_llm_unavailable", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        logger.exception(f"Worker Chat LLM switch failed: {request.model_name}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "chat_llm_load_failed", "message": str(exc)},
+        ) from exc
+    return {"message": f"Chat LLM loaded on {settings.DISTRIBUTED_NODE_ID}"}
 
 
 @router.post("/jobs")

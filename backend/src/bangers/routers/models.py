@@ -432,6 +432,13 @@ async def switch_dit_model(request: SwitchModelRequest) -> dict[str, str]:
         )
         await db.commit()
 
+        if settings.delegates_to_workers:
+            try:
+                nodes = await distributed_cluster.switch_dit_model(request.model_name)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            return {"message": f"DiT model switched to {request.model_name} on {', '.join(nodes)}"}
+
         status, ok = await generation_service.initialize_dit(
             config_path=request.model_name,
             device=generation_service.device or settings.DEFAULT_DEVICE,
@@ -464,6 +471,13 @@ async def switch_lm_model(request: SwitchModelRequest) -> dict[str, str]:
         )
         await db.commit()
 
+        if settings.delegates_to_workers:
+            try:
+                nodes = await distributed_cluster.switch_lm_model(request.model_name, runtime)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            return {"message": f"LM model switched to {request.model_name} on {', '.join(nodes)}"}
+
         status, ok = await generation_service.initialize_lm(
             lm_model_path=request.model_name,
             backend=runtime,
@@ -491,10 +505,26 @@ async def switch_chat_llm_model(request: SwitchModelRequest) -> dict[str, str]:
         )
 
     _reject_if_loading(model_name)
-
     generation_service._set_loading("chat_llm", model_name)
     try:
+        if settings.delegates_to_workers:
+            from bangers.db.connection import get_db
+
+            db = await get_db()
+            await db.execute(
+                "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+                ("dj_model", model_name),
+            )
+            await db.commit()
+            try:
+                nodes = await distributed_cluster.switch_chat_llm_model(model_name)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            return {"message": f"Chat LLM loaded on {', '.join(nodes)}"}
+
         await switch_chat_model(model_name)
+    except HTTPException:
+        raise
     except ChatRuntimeBusy as exc:
         raise HTTPException(
             status_code=409,

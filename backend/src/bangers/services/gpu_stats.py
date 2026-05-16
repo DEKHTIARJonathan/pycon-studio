@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import os
 import subprocess
 import time
 
@@ -117,13 +118,19 @@ def _read_local_gpu_stats_sync(
     holder: str | None = None,
 ) -> GpuStatsResponse:
     updated_at = time.time()
+    visible_devices = _cuda_visible_devices()
+    if visible_devices == ():
+        return GpuStatsResponse(device=device, updated_at=updated_at)
+    cmd = [
+        "nvidia-smi",
+        f"--query-gpu={_NVIDIA_SMI_QUERY}",
+        "--format=csv,noheader,nounits",
+    ]
+    if visible_devices is not None:
+        cmd.append(f"--id={','.join(visible_devices)}")
     try:
         result = subprocess.run(
-            [
-                "nvidia-smi",
-                f"--query-gpu={_NVIDIA_SMI_QUERY}",
-                "--format=csv,noheader,nounits",
-            ],
+            cmd,
             check=True,
             capture_output=True,
             text=True,
@@ -158,6 +165,19 @@ def _read_local_gpu_stats_sync(
     )
     response = GpuStatsResponse(device=device, gpus=gpus, updated_at=updated_at)
     return _with_legacy_first_device_fields(response)
+
+
+def _cuda_visible_devices() -> tuple[str, ...] | None:
+    """Return CUDA_VISIBLE_DEVICES as nvidia-smi ids, or None for all devices."""
+    raw = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if raw is None:
+        return None
+    value = raw.strip()
+    if not value or value.lower() == "all":
+        return None
+    if value.lower() in {"none", "void"} or value == "-1":
+        return ()
+    return tuple(part.strip() for part in value.split(",") if part.strip())
 
 
 async def read_local_gpu_stats(
