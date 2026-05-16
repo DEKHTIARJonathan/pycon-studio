@@ -220,6 +220,37 @@ Environment variables (all optional, sensible defaults provided):
 | `BANGERS_DATA_DIR` | `backend/data` | Runtime data directory for DB, audio, uploads, and datasets |
 | `BANGERS_MODEL_CACHE_DIR` | `.cache/models` | Persistent model/cache directory |
 | `ACESTEP_PROJECT_ROOT` | `.cache/models` | Root model directory for checkpoints and chat LLMs |
+| `BANGERS_DISTRIBUTED_ROLE` | `standalone` | `standalone`, `coordinator`, or `worker` |
+| `BANGERS_NODE_ID` | hostname | Human-readable node name reported to coordinators |
+| `BANGERS_WORKERS` | empty | Comma-separated worker backend URLs used by a coordinator |
+| `BANGERS_WORKER_CAPABILITIES` | all on standalone/worker, empty on coordinator | Comma-separated local capabilities: `music`, `ace_lm`, `chat_llm` |
+| `BANGERS_WORKER_TOKEN` | empty | Optional shared token for coordinator-to-worker requests |
+| `BANGERS_WORKER_TIMEOUT_SECONDS` | `900` | Coordinator HTTP timeout for long worker jobs |
+
+### Two DGX Spark Inference Split
+
+Run one backend as the coordinator and one backend per worker. A practical two-node split is:
+
+```bash
+# Coordinator/UI node
+BANGERS_DISTRIBUTED_ROLE=coordinator
+BANGERS_WORKERS=http://spark-music:8000,http://spark-llm:8000
+BANGERS_WORKER_TOKEN=change-me
+
+# Spark A: ACE-Step DiT/VAE music worker
+BANGERS_DISTRIBUTED_ROLE=worker
+BANGERS_NODE_ID=spark-music
+BANGERS_WORKER_CAPABILITIES=music
+BANGERS_WORKER_TOKEN=change-me
+
+# Spark B: ACE 5Hz LM plus app chat/title/lyrics worker
+BANGERS_DISTRIBUTED_ROLE=worker
+BANGERS_NODE_ID=spark-llm
+BANGERS_WORKER_CAPABILITIES=ace_lm,chat_llm
+BANGERS_WORKER_TOKEN=change-me
+```
+
+The coordinator keeps the UI, database, history, uploads, and copied audio artifacts. Workers expose internal APIs under `/api/internal/worker/*`; use the shared token on any non-private LAN.
 
 ## Keyboard Shortcuts
 

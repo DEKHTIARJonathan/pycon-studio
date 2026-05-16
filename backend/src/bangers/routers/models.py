@@ -35,6 +35,9 @@ from bangers.services.chat_llm import (
     get_loaded_chat_model_name,
     switch_chat_model,
 )
+from bangers.services.distributed import distributed_cluster
+from bangers.services.gpu_lock import gpu_lock
+from bangers.services.gpu_stats import merge_gpu_stats, read_local_gpu_stats
 from bangers.services.llm_provider import ChatRuntimeBusy
 
 router = APIRouter(tags=["models"])
@@ -46,6 +49,7 @@ class ModelInfo(BaseModel):
     name: str
     model_type: str
     is_active: bool = False
+    loaded_on: list[str] = Field(default_factory=list)
     compatibility: list[str] = Field(default_factory=list)
     format: str = ""
     quantization: str = ""
@@ -57,7 +61,62 @@ class ModelsResponse(BaseModel):
     chat_llm_models: list[ModelInfo] = []
 
 
-def _scan_checkpoints(loaded_chat_llm: str = "") -> ModelsResponse:
+ActiveModelMap = dict[str, dict[str, set[str]]]
+
+
+def _active_nodes(active_models: ActiveModelMap, model_type: str, name: str) -> list[str]:
+    return sorted(active_models.get(model_type, {}).get(name, set()))
+
+
+def _append_remote_active_models(
+    rows: list[ModelInfo],
+    *,
+    active_models: ActiveModelMap,
+    model_type: str,
+) -> None:
+    existing = {row.name for row in rows}
+    for name, nodes in sorted(active_models.get(model_type, {}).items()):
+        if not name or name in existing:
+            continue
+        rows.append(
+            ModelInfo(
+                name=name,
+                model_type=model_type,
+                is_active=True,
+                loaded_on=sorted(nodes),
+                compatibility=list(CHAT_LLM_COMPATIBILITY.get(name, ()))
+                if model_type == "chat_llm"
+                else [],
+                format=CHAT_LLM_FORMATS.get(name, "") if model_type == "chat_llm" else "",
+                quantization=CHAT_LLM_QUANTIZATIONS.get(name, "")
+                if model_type == "chat_llm"
+                else "",
+            )
+        )
+
+
+async def _distributed_active_models() -> ActiveModelMap:
+    active: ActiveModelMap = {"dit": {}, "lm": {}, "chat_llm": {}}
+    if not settings.delegates_to_workers:
+        return active
+    workers = await distributed_cluster.refresh(force=True)
+    for worker in workers:
+        node = worker.node_id or worker.url
+        if worker.ready_for("music") and worker.active_dit_model:
+            active["dit"].setdefault(worker.active_dit_model, set()).add(node)
+        if worker.ready_for("ace_lm") and worker.active_lm_model:
+            active["lm"].setdefault(worker.active_lm_model, set()).add(node)
+        if worker.ready_for("chat_llm") and worker.active_chat_llm_model:
+            active["chat_llm"].setdefault(worker.active_chat_llm_model, set()).add(node)
+    return active
+
+
+def _scan_checkpoints(
+    loaded_chat_llm: str = "",
+    *,
+    active_models: ActiveModelMap | None = None,
+) -> ModelsResponse:
+    active_models = active_models or {"dit": {}, "lm": {}, "chat_llm": {}}
     checkpoints_dir = Path(settings.ACESTEP_PROJECT_ROOT) / "checkpoints"
     chat_llm_dir = Path(settings.ACESTEP_PROJECT_ROOT) / "chat-llm"
     dit_models: list[ModelInfo] = []
@@ -65,38 +124,60 @@ def _scan_checkpoints(loaded_chat_llm: str = "") -> ModelsResponse:
     chat_llm_models: list[ModelInfo] = []
 
     if checkpoints_dir.exists():
-        active_dit = generation_service.active_dit_model
-        active_lm = generation_service.active_lm_model
+        active_dit = "" if settings.delegates_to_workers else generation_service.active_dit_model
+        active_lm = "" if settings.delegates_to_workers else generation_service.active_lm_model
 
         for entry in sorted(checkpoints_dir.iterdir()):
             if not entry.is_dir():
                 continue
             name = entry.name
             if name.startswith(("acestep-v15-", "acestep-v1-")):
+                loaded_on = _active_nodes(active_models, "dit", name)
                 dit_models.append(ModelInfo(
                     name=name,
                     model_type="dit",
-                    is_active=(name == active_dit),
+                    is_active=bool(loaded_on) or (name == active_dit),
+                    loaded_on=loaded_on,
                 ))
             elif name.startswith("acestep-5Hz-lm-"):
+                loaded_on = _active_nodes(active_models, "lm", name)
                 lm_models.append(ModelInfo(
                     name=name,
                     model_type="lm",
-                    is_active=(name == active_lm),
+                    is_active=bool(loaded_on) or (name == active_lm),
+                    loaded_on=loaded_on,
                 ))
 
     if chat_llm_dir.exists():
         for entry in sorted(chat_llm_dir.iterdir()):
             if entry.is_dir() and (entry / "config.json").exists():
                 name = entry.name
+                loaded_on = _active_nodes(active_models, "chat_llm", name)
                 chat_llm_models.append(ModelInfo(
                     name=name,
                     model_type="chat_llm",
-                    is_active=(name == loaded_chat_llm),
+                    is_active=bool(loaded_on) or (name == loaded_chat_llm),
+                    loaded_on=loaded_on,
                     compatibility=list(CHAT_LLM_COMPATIBILITY.get(name, ())),
                     format=CHAT_LLM_FORMATS.get(name, ""),
                     quantization=CHAT_LLM_QUANTIZATIONS.get(name, ""),
                 ))
+
+    _append_remote_active_models(
+        dit_models,
+        active_models=active_models,
+        model_type="dit",
+    )
+    _append_remote_active_models(
+        lm_models,
+        active_models=active_models,
+        model_type="lm",
+    )
+    _append_remote_active_models(
+        chat_llm_models,
+        active_models=active_models,
+        model_type="chat_llm",
+    )
 
     return ModelsResponse(
         dit_models=dit_models,
@@ -107,7 +188,10 @@ def _scan_checkpoints(loaded_chat_llm: str = "") -> ModelsResponse:
 
 @router.get("/models", response_model=ModelsResponse)
 async def list_models() -> ModelsResponse:
-    return _scan_checkpoints(loaded_chat_llm=get_loaded_chat_model_name())
+    return _scan_checkpoints(
+        loaded_chat_llm=get_loaded_chat_model_name(),
+        active_models=await _distributed_active_models(),
+    )
 
 
 def _scan_dir_bytes(path: Path) -> int:
@@ -432,31 +516,15 @@ async def switch_chat_llm_model(request: SwitchModelRequest) -> dict[str, str]:
 
 @router.get("/models/gpu-stats", response_model=GpuStatsResponse)
 async def get_gpu_stats() -> GpuStatsResponse:
-    device = generation_service.device or "unknown"
+    if settings.delegates_to_workers:
+        worker_stats = await distributed_cluster.collect_gpu_stats()
+        if worker_stats:
+            return merge_gpu_stats(worker_stats, device="distributed")
 
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            vram_used = torch.cuda.memory_allocated() / (1024 * 1024)
-            vram_total = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
-            return GpuStatsResponse(
-                device=device,
-                vram_used_mb=round(vram_used, 1),
-                vram_total_mb=round(vram_total, 1),
-                vram_percent=round(vram_used / vram_total * 100, 1) if vram_total > 0 else None,
-            )
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            allocated = 0.0
-            if hasattr(torch.mps, "current_allocated_memory"):
-                allocated = torch.mps.current_allocated_memory() / (1024 * 1024)
-            elif hasattr(torch.mps, "driver_allocated_size"):
-                allocated = torch.mps.driver_allocated_size() / (1024 * 1024)
-            return GpuStatsResponse(
-                device=device,
-                vram_used_mb=round(allocated, 1),
-            )
-    except Exception as e:
-        logger.warning(f"Failed to read GPU stats: {e}")
-
-    return GpuStatsResponse(device=device)
+    return await read_local_gpu_stats(
+        node_id=settings.DISTRIBUTED_NODE_ID,
+        node_role=settings.DISTRIBUTED_ROLE,
+        device=generation_service.device or "unknown",
+        busy=gpu_lock.is_locked,
+        holder=gpu_lock.holder,
+    )

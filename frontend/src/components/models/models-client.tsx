@@ -34,6 +34,7 @@ type ChatLlmRow =
       quantization: string;
       description: string;
       isActive: boolean;
+      loadedOn: string[];
     }
   | {
       state: "downloadable";
@@ -50,6 +51,7 @@ type ChatLlmRow =
       quantization: string;
       description: string;
       isActive: boolean;
+      loadedOn: string[];
     };
 
 const IS_MAC =
@@ -176,6 +178,7 @@ export function ModelsClient() {
         quantization: installed.quantization ?? "",
         description: availableByName.get(installed.name)?.description ?? "",
         isActive: installed.is_active,
+        loadedOn: installed.loaded_on ?? [],
       });
     }
 
@@ -193,6 +196,7 @@ export function ModelsClient() {
           quantization: candidate.quantization ?? "",
           description: candidate.description ?? "",
           isActive: false,
+          loadedOn: [],
         });
       } else {
         rows.push({
@@ -375,6 +379,11 @@ export function ModelsClient() {
                                   <span className="text-sm font-medium">{row.name}</span>
                                 )}
                                 <ModelCompatibilityBadges model={badgesModel} />
+                                {row.loadedOn.map((node) => (
+                                  <Badge key={node} variant="outline" className="text-[10px] text-muted-foreground">
+                                    {node.replace(/^spark-/, "")}
+                                  </Badge>
+                                ))}
                               </div>
                               {row.state === "unsupported" ? null : isLoaded ? (
                                 <Button variant="outline" size="sm" className="pointer-events-none text-green-500 border-green-500/30">

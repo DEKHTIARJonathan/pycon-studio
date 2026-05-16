@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from bangers.config import settings
 from bangers.db.connection import get_db
 from bangers.models.radio import StationResponse
 from bangers.services.duration_settings import get_default_duration
@@ -485,21 +486,22 @@ class RadioService:
 
         logger.info(f"Radio: generating next track for station '{station.name}' (id={station_id})")
 
-        if not generation_service.backend_ready:
+        if not generation_service.backend_ready and not settings.delegates_to_workers:
             return {
                 "success": False,
                 "error": "ACE-Step backend not loaded",
             }
 
-        # Hold the GPU lock across all MLX/ACE-Step work for this radio job:
-        # caption/spec helpers, sample fallback, and music generation all use
-        # Metal on Apple Silicon and cannot overlap safely.
-        acquired = await gpu_lock.await_acquire("radio")
-        if not acquired:
-            return {
-                "success": False,
-                "error": "GPU lock timeout. Please try again.",
-            }
+        # Standalone/local generation holds the GPU lock across all MLX and
+        # ACE-Step work. Coordinator mode delegates the heavy work to workers.
+        use_local_gpu_lock = not settings.delegates_to_workers
+        if use_local_gpu_lock:
+            acquired = await gpu_lock.await_acquire("radio")
+            if not acquired:
+                return {
+                    "success": False,
+                    "error": "GPU lock timeout. Please try again.",
+                }
 
         llm_caption: str | None = None
         llm_song_spec: dict[str, str] | None = None
@@ -591,9 +593,10 @@ class RadioService:
                 params_dict["lm_model"] = generation_service.active_lm_model
 
             if hasattr(generation_service, "prepare_params"):
+                allow_holders = frozenset({"radio"}) if use_local_gpu_lock else None
                 params_dict = await generation_service.prepare_params(
                     params_dict,
-                    allow_holders=frozenset({"radio"}),
+                    allow_holders=allow_holders,
                 )
 
             # Create generation history entry
@@ -646,7 +649,8 @@ class RadioService:
         finally:
             # Release after the music-critical stage. Title generation and
             # DB/file work run outside the music lock.
-            await gpu_lock.release("radio")
+            if use_local_gpu_lock:
+                await gpu_lock.release("radio")
 
         # --- Post-generation work (DB writes, file copies) runs WITHOUT the GPU lock ---
         try:
@@ -698,7 +702,6 @@ class RadioService:
                     # Copy to library
                     import shutil
                     from pathlib import Path
-                    from bangers.config import settings
 
                     src = Path(audio_path)
                     dest_filename = f"{song_id}.{file_format}"

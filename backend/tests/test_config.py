@@ -6,6 +6,12 @@ def _reset_settings(monkeypatch):
         "BANGERS_BATCH_SIZE",
         "BANGERS_THINKING",
         "BANGERS_MODEL_CACHE_DIR",
+        "BANGERS_DISTRIBUTED_ROLE",
+        "BANGERS_NODE_ID",
+        "BANGERS_WORKERS",
+        "BANGERS_WORKER_CAPABILITIES",
+        "BANGERS_WORKER_TOKEN",
+        "BANGERS_WORKER_TIMEOUT_SECONDS",
         "ACESTEP_PROJECT_ROOT",
         "HF_HOME",
         "HF_HUB_CACHE",
@@ -125,6 +131,43 @@ def test_default_duration_is_seeded_from_backend_default(monkeypatch):
         assert settings.DEFAULT_DURATION == DEFAULT_GENERATION_DURATION
         assert "default_duration" not in settings.startup_setting_overrides()
         assert settings.db_default_overrides()["default_duration"] == str(DEFAULT_GENERATION_DURATION)
+    finally:
+        _reset_settings(monkeypatch)
+
+
+def test_distributed_settings_parse_roles_workers_and_capabilities(monkeypatch):
+    from bangers.config import (
+        DISTRIBUTED_CAPABILITY_CHAT_LLM,
+        DISTRIBUTED_CAPABILITY_MUSIC,
+        DISTRIBUTED_CAPABILITIES,
+        settings,
+    )
+
+    try:
+        _reset_settings(monkeypatch)
+        assert settings.DISTRIBUTED_ROLE == "standalone"
+        assert settings.DISTRIBUTED_CAPABILITIES == DISTRIBUTED_CAPABILITIES
+        assert settings.delegates_to_workers is False
+
+        monkeypatch.setenv("BANGERS_DISTRIBUTED_ROLE", "coordinator")
+        monkeypatch.setenv("BANGERS_WORKERS", "http://spark-a:8000, http://spark-b:8000")
+        settings.apply_runtime_overrides()
+        assert settings.DISTRIBUTED_ROLE == "coordinator"
+        assert settings.DISTRIBUTED_WORKERS == (
+            "http://spark-a:8000",
+            "http://spark-b:8000",
+        )
+        assert settings.DISTRIBUTED_CAPABILITIES == frozenset()
+        assert settings.delegates_to_workers is True
+
+        monkeypatch.setenv("BANGERS_DISTRIBUTED_ROLE", "worker")
+        monkeypatch.setenv("BANGERS_WORKER_CAPABILITIES", "music,chat_llm,unknown")
+        settings.apply_runtime_overrides()
+        assert settings.DISTRIBUTED_ROLE == "worker"
+        assert settings.DISTRIBUTED_CAPABILITIES == frozenset({
+            DISTRIBUTED_CAPABILITY_MUSIC,
+            DISTRIBUTED_CAPABILITY_CHAT_LLM,
+        })
     finally:
         _reset_settings(monkeypatch)
 
