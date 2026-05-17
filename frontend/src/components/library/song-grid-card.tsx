@@ -1,14 +1,21 @@
 "use client";
 
-import { useRef } from "react";
-import { Heart, Play, Pause } from "lucide-react";
+import { useRef, useState } from "react";
+import { FileText, Heart, MessageSquareText, Play, Pause } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useWaveSurfer } from "@/hooks/use-wavesurfer";
 import { getSongAudioUrl } from "@/lib/api/client";
 import { usePlayerStore } from "@/stores/player-store";
 import type { SongResponse } from "@/types/api";
+import { TextDialog } from "./text-dialog";
 import Link from "next/link";
 
 interface SongGridCardProps {
@@ -24,6 +31,8 @@ export function SongGridCard({
   onToggleSelect,
   onPlay,
 }: SongGridCardProps) {
+  const [captionOpen, setCaptionOpen] = useState(false);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
   const waveformRef = useRef<HTMLDivElement>(null);
   const audioUrl = getSongAudioUrl(song.id);
   const { isPlaying, playPause } = useWaveSurfer(waveformRef, audioUrl, {
@@ -31,6 +40,8 @@ export function SongGridCard({
   });
   const currentSong = usePlayerStore((s) => s.currentSong);
   const isActive = currentSong?.id === song.id;
+  const caption = song.caption.trim();
+  const lyrics = song.lyrics.trim();
 
   return (
     <div
@@ -52,9 +63,45 @@ export function SongGridCard({
         />
       </div>
 
-      {song.is_favorite && (
-        <Heart className="absolute right-2 top-2 h-4 w-4 fill-red-500 text-red-500" />
-      )}
+      <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+        {caption && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="h-7 w-7 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                aria-label="View caption"
+                onClick={() => setCaptionOpen(true)}
+              >
+                <MessageSquareText className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>View caption</TooltipContent>
+          </Tooltip>
+        )}
+        {lyrics && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="h-7 w-7 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                aria-label="View lyrics"
+                onClick={() => setLyricsOpen(true)}
+              >
+                <FileText className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>View lyrics</TooltipContent>
+          </Tooltip>
+        )}
+        {song.is_favorite && (
+          <Heart className="h-4 w-4 fill-red-500 text-red-500" />
+        )}
+      </div>
 
       <div
         ref={waveformRef}
@@ -101,6 +148,23 @@ export function SongGridCard({
           {song.file_format.toUpperCase()}
         </Badge>
       </div>
+
+      {caption && (
+        <TextDialog
+          open={captionOpen}
+          onOpenChange={setCaptionOpen}
+          title="Caption"
+          text={song.caption}
+        />
+      )}
+      {lyrics && (
+        <TextDialog
+          open={lyricsOpen}
+          onOpenChange={setLyricsOpen}
+          title="Lyrics"
+          text={song.lyrics}
+        />
+      )}
     </div>
   );
 }

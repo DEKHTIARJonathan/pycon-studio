@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import {
   Play,
@@ -13,6 +13,8 @@ import {
   RefreshCw,
   GitBranch,
   Download,
+  FileText,
+  MessageSquareText,
 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -29,6 +31,7 @@ import { usePlayerStore } from "@/stores/player-store";
 import { updateSong } from "@/lib/api/client";
 import type { SongResponse } from "@/types/api";
 import { cn } from "@/lib/utils";
+import { TextDialog } from "./text-dialog";
 
 interface SongCardProps {
   song: SongResponse;
@@ -93,9 +96,13 @@ export function SongCard({
   onShowVariations,
   onExport,
 }: SongCardProps) {
+  const [captionOpen, setCaptionOpen] = useState(false);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
   const queryClient = useQueryClient();
   const currentSongId = usePlayerStore((s) => s.currentSong?.id);
   const isActive = currentSongId === song.id;
+  const caption = song.caption.trim();
+  const lyrics = song.lyrics.trim();
 
   const favoriteMutation = useMutation({
     mutationFn: () =>
@@ -235,6 +242,18 @@ export function SongCard({
             Add to Queue
           </DropdownMenuItem>
           <DropdownMenuSeparator />
+          {caption && (
+            <DropdownMenuItem onClick={() => setCaptionOpen(true)}>
+              <MessageSquareText className="h-4 w-4" />
+              View Caption
+            </DropdownMenuItem>
+          )}
+          {lyrics && (
+            <DropdownMenuItem onClick={() => setLyricsOpen(true)}>
+              <FileText className="h-4 w-4" />
+              View Lyrics
+            </DropdownMenuItem>
+          )}
           {onShowVariations && song.parent_song_id && (
             <DropdownMenuItem onClick={() => onShowVariations(song)}>
               <GitBranch className="h-4 w-4" />
@@ -268,6 +287,23 @@ export function SongCard({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {caption && (
+        <TextDialog
+          open={captionOpen}
+          onOpenChange={setCaptionOpen}
+          title="Caption"
+          text={song.caption}
+        />
+      )}
+      {lyrics && (
+        <TextDialog
+          open={lyricsOpen}
+          onOpenChange={setLyricsOpen}
+          title="Lyrics"
+          text={song.lyrics}
+        />
+      )}
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
   Loader2,
   Star,
   Download,
+  Expand,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TextDialog } from "./text-dialog";
 import { useWaveSurfer } from "@/hooks/use-wavesurfer";
 import { usePlayerStore } from "@/stores/player-store";
 import { usePlaybackController } from "@/hooks/use-playback-controller";
@@ -103,6 +105,8 @@ export function SongDetailClient({ songId }: SongDetailClientProps) {
     notes: "",
   });
   const [isDirty, setIsDirty] = useState(false);
+  const [captionOpen, setCaptionOpen] = useState(false);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
 
   useEffect(() => {
     if (song) {
@@ -302,24 +306,53 @@ export function SongDetailClient({ songId }: SongDetailClientProps) {
           {/* Caption */}
           <div className="space-y-1.5">
             <Label htmlFor="detail-caption">Caption</Label>
-            <Textarea
-              id="detail-caption"
-              value={form.caption}
-              onChange={(e) => updateForm({ caption: e.target.value })}
-              rows={2}
-            />
+            <div className="relative">
+              <Textarea
+                id="detail-caption"
+                value={form.caption}
+                onChange={(e) => updateForm({ caption: e.target.value })}
+                rows={2}
+                className={cn(form.caption.trim() && "pr-10")}
+              />
+              {form.caption.trim() && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-2 top-2 h-7 w-7"
+                  aria-label="Expand caption"
+                  onClick={() => setCaptionOpen(true)}
+                >
+                  <Expand className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Lyrics */}
           <div className="space-y-1.5">
             <Label htmlFor="detail-lyrics">Lyrics</Label>
-            <Textarea
-              id="detail-lyrics"
-              value={form.lyrics}
-              onChange={(e) => updateForm({ lyrics: e.target.value })}
-              rows={6}
-              className="font-mono text-xs"
-            />
+            <div className="relative">
+              <Textarea
+                id="detail-lyrics"
+                value={form.lyrics}
+                onChange={(e) => updateForm({ lyrics: e.target.value })}
+                rows={6}
+                className={cn("font-mono text-xs", form.lyrics.trim() && "pr-10")}
+              />
+              {form.lyrics.trim() && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-2 top-2 h-7 w-7"
+                  aria-label="Expand lyrics"
+                  onClick={() => setLyricsOpen(true)}
+                >
+                  <Expand className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Rating */}
@@ -448,6 +481,22 @@ export function SongDetailClient({ songId }: SongDetailClientProps) {
             </CardContent>
           </Card>
         )}
+      {form.caption.trim() && (
+        <TextDialog
+          open={captionOpen}
+          onOpenChange={setCaptionOpen}
+          title="Caption"
+          text={form.caption}
+        />
+      )}
+      {form.lyrics.trim() && (
+        <TextDialog
+          open={lyricsOpen}
+          onOpenChange={setLyricsOpen}
+          title="Lyrics"
+          text={form.lyrics}
+        />
+      )}
     </motion.div>
   );
 }
