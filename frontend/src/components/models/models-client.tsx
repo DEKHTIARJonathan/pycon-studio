@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, useIsMutating } from "@tanstack/react-query";
 import { Check, Cpu, Download, ExternalLink, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +16,7 @@ import {
 import {
   fetchModels,
   fetchAvailableModels,
+  fetchHealth,
   downloadModel,
   switchChatLlmModel,
 } from "@/lib/api/client";
@@ -34,6 +35,7 @@ type ChatLlmRow =
       quantization: string;
       description: string;
       isActive: boolean;
+      isLoading: boolean;
     }
   | {
       state: "downloadable";
@@ -50,13 +52,29 @@ type ChatLlmRow =
       quantization: string;
       description: string;
       isActive: boolean;
+      isLoading: boolean;
     };
 
 const IS_MAC =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+const MODEL_INIT_STAGES = new Set(["downloading", "loading_dit", "loading_lm", "loading_chat_llm"]);
+const MODEL_TERMINAL_INIT_STAGES = new Set(["ready", "error"]);
 
 function isMlxOnly(compatibility: readonly string[]): boolean {
   return compatibility.length > 0 && compatibility.every((c) => c === "mlx");
+}
+
+function hasLoadingModel(models?: {
+  dit_models: ModelInfo[];
+  lm_models: ModelInfo[];
+  chat_llm_models: ModelInfo[];
+}) {
+  return Boolean(
+    models &&
+      [...models.dit_models, ...models.lm_models, ...models.chat_llm_models].some(
+        (model) => model.is_loading,
+      ),
+  );
 }
 
 function ModelCompatibilityBadges({
@@ -83,10 +101,21 @@ function ModelCompatibilityBadges({
 
 export function ModelsClient() {
   const queryClient = useQueryClient();
+  const modelLoadMutationCount = useIsMutating({ mutationKey: ["model-load"] });
+
+  const { data: health } = useQuery({
+    queryKey: ["health"],
+    queryFn: fetchHealth,
+    retry: false,
+  });
+  const initStage = health?.init_stage ?? "";
+  const isModelInitializing = MODEL_INIT_STAGES.has(initStage);
 
   const { data: models, isLoading } = useQuery({
     queryKey: ["models"],
     queryFn: fetchModels,
+    refetchInterval: (query) =>
+      isModelInitializing || hasLoadingModel(query.state.data) ? 1_000 : false,
   });
 
   const { data: available } = useQuery({
@@ -103,6 +132,7 @@ export function ModelsClient() {
   });
 
   const chatLlmSwitchMutation = useMutation({
+    mutationKey: ["model-load"],
     mutationFn: switchChatLlmModel,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["models"] });
@@ -126,6 +156,12 @@ export function ModelsClient() {
   });
 
   const prevDownloadingRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (isModelInitializing || MODEL_TERMINAL_INIT_STAGES.has(initStage)) {
+      queryClient.invalidateQueries({ queryKey: ["models"] });
+    }
+  }, [initStage, isModelInitializing, queryClient]);
 
   useEffect(() => {
     if (!available) return;
@@ -154,6 +190,11 @@ export function ModelsClient() {
   const ditAvailable = available?.models.filter((m) => m.model_type === "dit") ?? [];
   const lmAvailable = available?.models.filter((m) => m.model_type === "lm") ?? [];
   const chatLlmAvailable = available?.models.filter((m) => m.model_type === "chat_llm") ?? [];
+  const hasAnyModelLoading = isModelInitializing || hasLoadingModel(models) || modelLoadMutationCount > 0;
+  const hasChatLlmLoadedOrLoading =
+    models?.chat_llm_models.some((model) => model.is_active || model.is_loading) ?? false;
+  const hasChatLlmLoading =
+    models?.chat_llm_models.some((model) => model.is_loading) ?? false;
 
   const chatLlmRows: ChatLlmRow[] = (() => {
     const installedScanned = models?.chat_llm_models ?? [];
@@ -176,6 +217,7 @@ export function ModelsClient() {
         quantization: installed.quantization ?? "",
         description: availableByName.get(installed.name)?.description ?? "",
         isActive: installed.is_active,
+        isLoading: Boolean(installed.is_loading),
       });
     }
 
@@ -193,6 +235,7 @@ export function ModelsClient() {
           quantization: candidate.quantization ?? "",
           description: candidate.description ?? "",
           isActive: false,
+          isLoading: false,
         });
       } else {
         rows.push({
@@ -254,12 +297,14 @@ export function ModelsClient() {
                     models={models?.dit_models ?? []}
                     availableModels={ditAvailable}
                     modelType="dit"
+                    loadDisabled={hasAnyModelLoading}
                   />
                   <ModelCards
                     title="Language Models"
                     models={models?.lm_models ?? []}
                     availableModels={lmAvailable}
                     modelType="lm"
+                    loadDisabled={hasAnyModelLoading}
                   />
                 </CardContent>
               </Card>
@@ -347,8 +392,10 @@ export function ModelsClient() {
                             );
                           }
 
+                          const isLoadingModel =
+                            row.state === "installed" && row.isLoading;
                           const isLoaded =
-                            row.state === "installed" && row.isActive;
+                            row.state === "installed" && row.isActive && !row.isLoading;
                           const badgesModel = {
                             compatibility: row.compatibility,
                             quantization: row.quantization,
@@ -376,7 +423,12 @@ export function ModelsClient() {
                                 )}
                                 <ModelCompatibilityBadges model={badgesModel} />
                               </div>
-                              {row.state === "unsupported" ? null : isLoaded ? (
+                              {row.state === "unsupported" ? null : isLoadingModel ? (
+                                <Button variant="outline" size="sm" disabled>
+                                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                  Loading...
+                                </Button>
+                              ) : isLoaded ? (
                                 <Button variant="outline" size="sm" className="pointer-events-none text-green-500 border-green-500/30">
                                   Loaded
                                   <Check className="ml-1 h-3 w-3" />
@@ -386,13 +438,13 @@ export function ModelsClient() {
                                   variant="outline"
                                   size="sm"
                                   onClick={() => chatLlmSwitchMutation.mutate(row.name)}
-                                  disabled={chatLlmSwitchMutation.isPending}
+                                  disabled={hasAnyModelLoading || hasChatLlmLoading || chatLlmSwitchMutation.isPending}
                                 >
                                   {chatLlmSwitchMutation.isPending &&
                                     chatLlmSwitchMutation.variables === row.name && (
                                       <Loader2 className="mr-1 h-3 w-3 animate-spin" />
                                     )}
-                                  {models?.chat_llm_models.some((model) => model.is_active) ? "Switch" : "Load"}
+                                  {hasChatLlmLoadedOrLoading ? "Switch" : "Load"}
                                 </Button>
                               )}
                             </div>

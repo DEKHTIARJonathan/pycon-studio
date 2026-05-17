@@ -18,6 +18,7 @@ interface ModelCardsProps {
   models: ModelInfo[];
   availableModels?: AvailableModel[];
   modelType: "dit" | "lm";
+  loadDisabled?: boolean;
   loadingModelName?: string | null;
 }
 
@@ -26,11 +27,13 @@ export function ModelCards({
   models,
   availableModels = [],
   modelType,
+  loadDisabled = false,
   loadingModelName,
 }: ModelCardsProps) {
   const queryClient = useQueryClient();
 
   const switchModelMutation = useMutation({
+    mutationKey: ["model-load"],
     mutationFn: (name: string) =>
       modelType === "dit" ? switchDitModel(name) : switchLmModel(name),
     onSuccess: () => {
@@ -54,6 +57,8 @@ export function ModelCards({
     (am) => am.downloading || (!am.installed && !installedNames.has(am.name)),
   );
   const availableByName = new Map(availableModels.map((am) => [am.name, am]));
+  const hasLoadedOrLoadingModel = models.some((model) => model.is_active || model.is_loading);
+  const hasServerLoadingModel = models.some((model) => model.is_loading);
 
   return (
     <div className="space-y-2">
@@ -66,6 +71,7 @@ export function ModelCards({
             {models.map((model) => {
               const description = availableByName.get(model.name)?.description;
               const loading =
+                Boolean(model.is_loading) ||
                 loadingModelName === model.name ||
                 (switchModelMutation.isPending && switchModelMutation.variables === model.name);
               return (
@@ -87,7 +93,12 @@ export function ModelCards({
                       <span className="text-sm font-medium">{model.name}</span>
                     )}
                   </div>
-                  {model.is_active ? (
+                  {loading ? (
+                    <Button variant="outline" size="sm" disabled>
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      Loading...
+                    </Button>
+                  ) : model.is_active ? (
                     <Button variant="outline" size="sm" className="pointer-events-none text-green-500 border-green-500/30">
                       Loaded
                       <Check className="ml-1 h-3 w-3" />
@@ -97,10 +108,9 @@ export function ModelCards({
                       variant="outline"
                       size="sm"
                       onClick={() => switchModelMutation.mutate(model.name)}
-                      disabled={switchModelMutation.isPending}
+                      disabled={loadDisabled || hasServerLoadingModel || switchModelMutation.isPending}
                     >
-                      {loading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                      {models.some((m) => m.is_active) ? "Switch" : "Load"}
+                      {hasLoadedOrLoadingModel ? "Switch" : "Load"}
                     </Button>
                   )}
                 </div>

@@ -46,6 +46,7 @@ class ModelInfo(BaseModel):
     name: str
     model_type: str
     is_active: bool = False
+    is_loading: bool = False
     compatibility: list[str] = Field(default_factory=list)
     format: str = ""
     quantization: str = ""
@@ -63,6 +64,9 @@ def _scan_checkpoints(loaded_chat_llm: str = "") -> ModelsResponse:
     dit_models: list[ModelInfo] = []
     lm_models: list[ModelInfo] = []
     chat_llm_models: list[ModelInfo] = []
+    loading_state = generation_service.loading_state or {}
+    loading_kind = loading_state.get("kind")
+    loading_model_name = loading_state.get("model_name")
 
     if checkpoints_dir.exists():
         active_dit = generation_service.active_dit_model
@@ -77,12 +81,14 @@ def _scan_checkpoints(loaded_chat_llm: str = "") -> ModelsResponse:
                     name=name,
                     model_type="dit",
                     is_active=(name == active_dit),
+                    is_loading=(loading_kind == "dit" and name == loading_model_name),
                 ))
             elif name.startswith("acestep-5Hz-lm-"):
                 lm_models.append(ModelInfo(
                     name=name,
                     model_type="lm",
                     is_active=(name == active_lm),
+                    is_loading=(loading_kind == "lm" and name == loading_model_name),
                 ))
 
     if chat_llm_dir.exists():
@@ -93,6 +99,7 @@ def _scan_checkpoints(loaded_chat_llm: str = "") -> ModelsResponse:
                     name=name,
                     model_type="chat_llm",
                     is_active=(name == loaded_chat_llm),
+                    is_loading=(loading_kind == "chat_llm" and name == loading_model_name),
                     compatibility=list(CHAT_LLM_COMPATIBILITY.get(name, ())),
                     format=CHAT_LLM_FORMATS.get(name, ""),
                     quantization=CHAT_LLM_QUANTIZATIONS.get(name, ""),
@@ -331,16 +338,16 @@ async def switch_dit_model(request: SwitchModelRequest) -> dict[str, str]:
     from bangers.db.connection import get_db
 
     _reject_if_loading(request.model_name)
-
-    db = await get_db()
-    await db.execute(
-        "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
-        ("dit_model", request.model_name),
-    )
-    await db.commit()
-
     generation_service._set_loading("dit", request.model_name)
+
     try:
+        db = await get_db()
+        await db.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+            ("dit_model", request.model_name),
+        )
+        await db.commit()
+
         status, ok = await generation_service.initialize_dit(
             config_path=request.model_name,
             device=generation_service.device or settings.DEFAULT_DEVICE,
@@ -358,21 +365,21 @@ async def switch_lm_model(request: SwitchModelRequest) -> dict[str, str]:
     from bangers.db.connection import get_db
 
     _reject_if_loading(request.model_name)
-
-    db = await get_db()
-    runtime = request.runtime or settings.DEFAULT_LM_BACKEND
-    await db.execute(
-        "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
-        ("lm_model", request.model_name),
-    )
-    await db.execute(
-        "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
-        ("lm_backend", runtime),
-    )
-    await db.commit()
-
     generation_service._set_loading("lm", request.model_name)
+
     try:
+        db = await get_db()
+        runtime = request.runtime or settings.DEFAULT_LM_BACKEND
+        await db.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+            ("lm_model", request.model_name),
+        )
+        await db.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+            ("lm_backend", runtime),
+        )
+        await db.commit()
+
         status, ok = await generation_service.initialize_lm(
             lm_model_path=request.model_name,
             backend=runtime,
@@ -399,6 +406,9 @@ async def switch_chat_llm_model(request: SwitchModelRequest) -> dict[str, str]:
             detail=f"{model_name} requires MLX on macOS.",
         )
 
+    _reject_if_loading(model_name)
+
+    generation_service._set_loading("chat_llm", model_name)
     try:
         await switch_chat_model(model_name)
     except ChatRuntimeBusy as exc:
@@ -426,6 +436,8 @@ async def switch_chat_llm_model(request: SwitchModelRequest) -> dict[str, str]:
                 "message": str(exc),
             },
         ) from exc
+    finally:
+        generation_service._clear_loading()
 
     return {"message": f"Chat LLM loaded: {model_name}"}
 

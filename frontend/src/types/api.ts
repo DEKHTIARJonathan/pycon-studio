@@ -187,6 +187,7 @@ export interface ModelInfo {
   name: string;
   model_type: string;
   is_active: boolean;
+  is_loading?: boolean;
   compatibility?: string[];
   format?: string;
   quantization?: string;

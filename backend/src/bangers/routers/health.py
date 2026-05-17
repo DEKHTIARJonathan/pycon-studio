@@ -20,6 +20,12 @@ def build_health_snapshot() -> HealthResponse:
     instance_id = get_instance_id()
     lm_ready = svc.lm_initialized or svc.lm_disabled
     status = "ok" if svc.dit_initialized else "degraded"
+    loading_state = svc.loading_state or {}
+    init_stage = (
+        "loading_chat_llm"
+        if loading_state.get("kind") == "chat_llm"
+        else svc.init_stage
+    )
     return HealthResponse(
         status=status,
         dit_model_loaded=svc.dit_initialized,
@@ -27,7 +33,7 @@ def build_health_snapshot() -> HealthResponse:
         dit_model=svc.active_dit_model,
         lm_model=svc.active_lm_model,
         device=svc.device,
-        init_stage=svc.init_stage,
+        init_stage=init_stage,
         init_error=svc.init_error,
         download_progress=svc.download_progress,
         instance_id=instance_id,

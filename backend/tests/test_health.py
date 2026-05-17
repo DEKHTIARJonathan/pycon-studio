@@ -39,6 +39,18 @@ async def test_health_returns_stable_instance_id(client):
     assert second.json()["instance_id"] == instance_id
 
 
+@pytest.mark.asyncio
+async def test_health_reports_chat_llm_loading_stage(client):
+    from bangers.services.generation import generation_service
+
+    generation_service._set_loading("chat_llm", "Qwen3-1.7B")
+
+    resp = await client.get("/api/health")
+
+    assert resp.status_code == 200
+    assert resp.json()["init_stage"] == "loading_chat_llm"
+
+
 def test_default_settings_have_no_instance_id():
     # instance_id is generated per-DB at init_db time, NOT seeded as a
     # default. Otherwise every fresh DB would share the same id.

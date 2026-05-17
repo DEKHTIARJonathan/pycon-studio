@@ -187,7 +187,11 @@ async def lifespan(app: FastAPI):
             from bangers.services.chat_llm import warm_chat_model
 
             logger.info(f"Initializing Chat LLM: {chat_model}")
-            await warm_chat_model(chat_model)
+            generation_service._set_loading("chat_llm", chat_model)
+            try:
+                await warm_chat_model(chat_model)
+            finally:
+                generation_service._clear_loading()
             logger.info("Chat LLM loaded successfully")
         except Exception as exc:
             logger.warning(f"Chat LLM failed to load: {exc}")

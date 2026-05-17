@@ -153,14 +153,35 @@ async def test_unknown_model_download_is_rejected(client):
 
 
 @pytest.mark.asyncio
+async def test_switch_model_rejected_while_another_model_is_loading(client):
+    from bangers.services.generation import generation_service
+
+    generation_service._set_loading("dit", "acestep-v15-base")
+
+    response = await client.post(
+        "/api/models/switch-lm",
+        json={"model_name": "acestep-5Hz-lm-0.6B"},
+    )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["error"] == "load_in_flight"
+    assert detail["loading"]["kind"] == "dit"
+
+
+@pytest.mark.asyncio
 async def test_switch_chat_llm_loads_and_persists_model(client, monkeypatch):
     from bangers.db.connection import get_db
     from bangers.routers import models as models_router
+    from bangers.services.generation import generation_service
 
     calls: list[str] = []
 
     async def fake_switch(model_name: str) -> None:
         calls.append(model_name)
+        assert generation_service.loading_state is not None
+        assert generation_service.loading_state["kind"] == "chat_llm"
+        assert generation_service.loading_state["model_name"] == model_name
         db = await get_db()
         await db.execute(
             "INSERT OR REPLACE INTO settings (key, value, updated_at) "
@@ -178,6 +199,7 @@ async def test_switch_chat_llm_loads_and_persists_model(client, monkeypatch):
 
     assert response.status_code == 200
     assert calls == ["Qwen3-1.7B"]
+    assert generation_service.loading_state is None
 
     db = await get_db()
     cursor = await db.execute("SELECT value FROM settings WHERE key = 'dj_model'")
@@ -214,3 +236,58 @@ async def test_chat_llm_active_status_uses_loaded_runtime_not_persisted_setting(
     assert response.status_code == 200
     chat_models = response.json()["chat_llm_models"]
     assert chat_models[0]["is_active"] is True
+
+
+@pytest.mark.asyncio
+async def test_models_marks_current_ace_load(client):
+    from bangers.config import settings
+    from bangers.services.generation import generation_service
+
+    checkpoint_dir = settings.MODEL_CACHE_DIR / "checkpoints" / "acestep-v15-base"
+    checkpoint_dir.mkdir(parents=True)
+    generation_service._set_loading("dit", "acestep-v15-base")
+
+    response = await client.get("/api/models")
+
+    assert response.status_code == 200
+    dit_models = response.json()["dit_models"]
+    assert dit_models[0]["name"] == "acestep-v15-base"
+    assert dit_models[0]["is_active"] is False
+    assert dit_models[0]["is_loading"] is True
+
+
+@pytest.mark.asyncio
+async def test_models_marks_current_ace_lm_load(client):
+    from bangers.config import settings
+    from bangers.services.generation import generation_service
+
+    checkpoint_dir = settings.MODEL_CACHE_DIR / "checkpoints" / "acestep-5Hz-lm-0.6B"
+    checkpoint_dir.mkdir(parents=True)
+    generation_service._set_loading("lm", "acestep-5Hz-lm-0.6B")
+
+    response = await client.get("/api/models")
+
+    assert response.status_code == 200
+    lm_models = response.json()["lm_models"]
+    assert lm_models[0]["name"] == "acestep-5Hz-lm-0.6B"
+    assert lm_models[0]["is_active"] is False
+    assert lm_models[0]["is_loading"] is True
+
+
+@pytest.mark.asyncio
+async def test_models_marks_current_chat_llm_load(client):
+    from bangers.config import settings
+    from bangers.services.generation import generation_service
+
+    chat_dir = settings.MODEL_CACHE_DIR / "chat-llm" / "Qwen3-1.7B"
+    chat_dir.mkdir(parents=True)
+    (chat_dir / "config.json").write_text("{}", encoding="utf-8")
+    generation_service._set_loading("chat_llm", "Qwen3-1.7B")
+
+    response = await client.get("/api/models")
+
+    assert response.status_code == 200
+    chat_models = response.json()["chat_llm_models"]
+    assert chat_models[0]["name"] == "Qwen3-1.7B"
+    assert chat_models[0]["is_active"] is False
+    assert chat_models[0]["is_loading"] is True
