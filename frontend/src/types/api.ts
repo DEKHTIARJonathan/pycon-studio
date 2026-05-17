@@ -251,9 +251,16 @@ export interface SongVariationsResponse {
 
 export interface GpuStats {
   device: string;
+  provider?: string;
+  memory_type?: string;
+  gpu_utilization_percent?: number | null;
+  renderer_utilization_percent?: number | null;
+  tiler_utilization_percent?: number | null;
   vram_used_mb?: number | null;
   vram_total_mb?: number | null;
   vram_percent?: number | null;
+  memory_cache_mb?: number | null;
+  memory_peak_mb?: number | null;
   gpus?: GpuDeviceStats[];
   updated_at?: number;
   error?: string;
@@ -266,11 +273,17 @@ export interface GpuDeviceStats {
   device_index: number;
   name: string;
   uuid: string;
+  provider?: string;
+  memory_type?: string;
   utilization_gpu_percent: number | null;
   utilization_memory_percent: number | null;
+  renderer_utilization_percent?: number | null;
+  tiler_utilization_percent?: number | null;
   vram_used_mb: number | null;
   vram_total_mb: number | null;
   vram_percent: number | null;
+  memory_cache_mb?: number | null;
+  memory_peak_mb?: number | null;
   power_draw_w: number | null;
   power_limit_w: number | null;
   busy: boolean;

@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -563,10 +564,19 @@ async def get_gpu_stats() -> GpuStatsResponse:
         if worker_stats:
             return merge_gpu_stats(worker_stats, device="distributed")
 
-    return await read_local_gpu_stats(
-        node_id=settings.DISTRIBUTED_NODE_ID,
-        node_role=settings.DISTRIBUTED_ROLE,
-        device=generation_service.device or "unknown",
-        busy=gpu_lock.is_locked,
-        holder=gpu_lock.holder,
-    )
+    device = generation_service.device or "unknown"
+    try:
+        return await read_local_gpu_stats(
+            node_id=settings.DISTRIBUTED_NODE_ID,
+            node_role=settings.DISTRIBUTED_ROLE,
+            device=device,
+            busy=gpu_lock.is_locked,
+            holder=gpu_lock.holder,
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to read GPU stats: {exc}")
+        return GpuStatsResponse(
+            device=device,
+            updated_at=time.time(),
+            error=str(exc),
+        )
