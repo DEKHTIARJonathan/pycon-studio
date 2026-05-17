@@ -19,6 +19,7 @@ from bangers.models.generation import (
     GenerateTitleRequest,
     GenerateTitleResponse,
 )
+from bangers.config import settings
 from bangers.db.connection import get_db
 from bangers.services.duration_settings import coerce_duration, get_default_duration
 from bangers.services.generation import generation_service
@@ -276,26 +277,27 @@ async def submit_generation(request: GenerateRequest) -> GenerateResponse:
 
     await _apply_saved_generation_defaults(request)
 
-    if not svc.active_dit_model:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "no_dit_model_selected",
-                "message": "No ACE-Step DiT model selected. Choose one on the Models page.",
-                "missing": ["dit_model"],
-            },
-        )
-    if not svc.backend_ready:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "dit_model_not_loaded",
-                "message": (
-                    f"DiT model '{svc.active_dit_model}' is still loading or "
-                    "failed to load. Check server logs and try again shortly."
-                ),
-            },
-        )
+    if not settings.delegates_to_workers:
+        if not svc.active_dit_model:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "no_dit_model_selected",
+                    "message": "No ACE-Step DiT model selected. Choose one on the Models page.",
+                    "missing": ["dit_model"],
+                },
+            )
+        if not svc.backend_ready:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "dit_model_not_loaded",
+                    "message": (
+                        f"DiT model '{svc.active_dit_model}' is still loading or "
+                        "failed to load. Check server logs and try again shortly."
+                    ),
+                },
+            )
 
     job_id = svc.create_job()
 
@@ -310,6 +312,7 @@ async def _run_generation(job_id: str, request: GenerateRequest) -> None:
     queue_wait_started = time.perf_counter()
     deferred_title_source: str | None = None
     deferred_title_history_id: str | None = None
+    use_local_gpu_lock = not settings.delegates_to_workers
 
     # Check cancellation before waiting for GPU
     if svc.is_cancelled(job_id):
@@ -320,7 +323,7 @@ async def _run_generation(job_id: str, request: GenerateRequest) -> None:
         return
 
     current_holder = gpu_lock.holder
-    if gpu_lock.is_locked:
+    if use_local_gpu_lock and gpu_lock.is_locked:
         await generation_ws_manager.broadcast({
             "type": "progress",
             "job_id": job_id,
@@ -328,14 +331,18 @@ async def _run_generation(job_id: str, request: GenerateRequest) -> None:
             "stage": f"Waiting for GPU (in use by {current_holder})...",
         })
 
-    await gpu_lock.await_acquire("generation")
-    timings["queue_wait_ms"] = round((time.perf_counter() - queue_wait_started) * 1000, 2)
+    if use_local_gpu_lock:
+        await gpu_lock.await_acquire("generation")
+        timings["queue_wait_ms"] = round((time.perf_counter() - queue_wait_started) * 1000, 2)
+    else:
+        timings["queue_wait_ms"] = 0.0
     svc.update_job(job_id, timings=timings)
 
     # Check cancellation after acquiring GPU
     if svc.is_cancelled(job_id):
         logger.info(f"Job {job_id} cancelled after GPU acquire")
-        await gpu_lock.release("generation")
+        if use_local_gpu_lock:
+            await gpu_lock.release("generation")
         await generation_ws_manager.broadcast({
             "type": "failed", "job_id": job_id, "error": "Cancelled by user",
         })
@@ -355,9 +362,10 @@ async def _run_generation(job_id: str, request: GenerateRequest) -> None:
 
     try:
         lyrics_started = time.perf_counter()
+        allow_holders = frozenset({"generation"}) if use_local_gpu_lock else None
         params_dict = await svc.prepare_params(
             params_dict,
-            allow_holders=frozenset({"generation"}),
+            allow_holders=allow_holders,
         )
         timings["lyrics_pipeline_ms"] = round(
             (time.perf_counter() - lyrics_started) * 1000,
@@ -372,7 +380,8 @@ async def _run_generation(job_id: str, request: GenerateRequest) -> None:
             timings=timings,
             history_id=history_id,
         )
-        await gpu_lock.release("generation")
+        if use_local_gpu_lock:
+            await gpu_lock.release("generation")
         await generation_ws_manager.broadcast({
             "type": "failed",
             "job_id": job_id,
@@ -408,7 +417,8 @@ async def _run_generation(job_id: str, request: GenerateRequest) -> None:
     # Check cancellation before generation
     if svc.is_cancelled(job_id):
         logger.info(f"Job {job_id} cancelled before generation")
-        await gpu_lock.release("generation")
+        if use_local_gpu_lock:
+            await gpu_lock.release("generation")
         await generation_ws_manager.broadcast({
             "type": "failed", "job_id": job_id, "error": "Cancelled by user",
         })
@@ -508,20 +518,18 @@ async def _run_generation(job_id: str, request: GenerateRequest) -> None:
                     }
                     results.append(audio_info)
 
-                # Generate the title while we still hold the music GPU lock
-                # so the next job can't squeeze in front and force the title
-                # LM to wait. We pass allow_holders={"generation"} so the
-                # MLX runtime's "GPU busy" defense lets us through (we ARE
-                # the holder).
+                # When generating locally, keep the title inside the music
+                # lock so the next job cannot jump ahead of it.
                 title_source = request.caption
                 generated_title: str | None = None
                 if request.auto_title and title_source:
                     try:
                         from bangers.services.title_generator import generate_song_title
                         title_started = time.perf_counter()
+                        allow_holders = frozenset({"generation"}) if use_local_gpu_lock else None
                         generated_title = await generate_song_title(
                             title_source, "", "", "Untitled",
-                            allow_holders=frozenset({"generation"}),
+                            allow_holders=allow_holders,
                         )
                         timings["title_llm_ms"] = round(
                             (time.perf_counter() - title_started) * 1000, 2
@@ -667,7 +675,8 @@ async def _run_generation(job_id: str, request: GenerateRequest) -> None:
             })
     finally:
         lm_interpolator.cleanup()
-        await gpu_lock.release("generation")
+        if use_local_gpu_lock:
+            await gpu_lock.release("generation")
 
     if deferred_title_source and deferred_title_history_id:
         from bangers.services.deferred_titles import schedule_history_title_retry
