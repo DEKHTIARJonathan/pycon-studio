@@ -7,7 +7,6 @@ Inspired by:
 """
 
 import json
-import random
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -22,8 +21,7 @@ from bangers.services.generation_request_builder import build_text_to_music_para
 from bangers.services.gpu_lock import gpu_lock
 from bangers.services import chat_llm
 from bangers.services.llm_provider import ChatRuntime, installed_chat_models
-from bangers.services.lyrics_pipeline import LyricsRejectedError, generate_song_spec
-from bangers.services.title_generator import clean_title
+from bangers.services.music_specs import build_music_spec
 
 RADIO_DEFAULT_SYSTEM_PROMPT = """You are a music caption generator. Given station parameters, write a creative, \
 detailed caption for an AI music generator. Describe instrumentation, texture, \
@@ -267,212 +265,6 @@ class RadioService:
             return (None, model_name, system_prompt)
         return (runtime, model_name, system_prompt)
 
-    def _station_prompt_parts(self, station: StationResponse) -> list[str]:
-        parts = []
-        if station.genre:
-            parts.append(f"Genre: {station.genre}")
-        if station.mood:
-            parts.append(f"Mood: {station.mood}")
-        parts.append(f"Instrumental: {'yes' if station.instrumental else 'no'}")
-        parts.append("Vocal language: english (write all lyrics in English)")
-        if station.bpm_min is not None and station.bpm_max is not None:
-            parts.append(f"BPM range: {station.bpm_min}-{station.bpm_max}")
-        if station.keyscale:
-            parts.append(f"Key/scale: {station.keyscale}")
-        if station.timesignature:
-            parts.append(f"Time signature: {station.timesignature}")
-        if station.caption_template:
-            parts.append(f"Style reference: {station.caption_template}")
-        return parts
-
-    async def _generate_caption_with_llm(self, station: StationResponse) -> Optional[str]:
-        """Attempt to generate a caption using the configured LLM provider.
-
-        Returns the generated caption string, or None to fall back to template.
-        """
-        provider, model_name, system_prompt = await self._get_radio_llm()
-        if provider is None:
-            logger.info("Radio caption: no LLM provider available, using template")
-            return None
-
-        logger.info(f"Radio caption: generating via {model_name}")
-
-        # Build user message from station parameters
-        parts = self._station_prompt_parts(station)
-
-        user_message = "Generate a unique music caption for these station parameters:\n" + "\n".join(parts)
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ]
-
-        try:
-            caption = await provider.chat(
-                messages,
-                model_name,
-                allow_holders=frozenset({"radio"}),
-            )
-            caption = caption.strip()
-            if caption:
-                logger.info(f"Radio LLM caption generated ({len(caption)} chars) via {model_name}")
-                return caption
-            return None
-        except Exception as e:
-            logger.warning(f"Radio LLM caption generation failed ({model_name}): {e}")
-            return None
-
-    async def _generate_song_spec_with_llm(
-        self, station: StationResponse
-    ) -> Optional[dict[str, str]]:
-        """Generate a vocal radio caption and lyrics with the configured radio LLM."""
-        parts = self._station_prompt_parts(station)
-        _provider, model_name, system_prompt = await self._get_radio_llm()
-        if not model_name:
-            logger.info("Radio lyrics: no app Chat LLM available, using fallback")
-            return None
-        logger.info(f"Radio lyrics: generating via {model_name}")
-        prompt = (
-            "Generate a unique vocal song spec for these radio station parameters:\n"
-            + "\n".join(parts)
-            + "\n\nCaption style guidance:\n"
-            + system_prompt
-        )
-
-        try:
-            spec = await generate_song_spec(
-                prompt,
-                instrumental=False,
-                allow_holders=frozenset({"radio"}),
-            )
-            caption = str(spec.get("caption", "")).strip()
-            lyrics = str(spec.get("lyrics", "")).strip()
-            if caption and lyrics:
-                logger.info(
-                    f"Radio LLM lyric spec generated ({len(caption)} caption chars, {len(lyrics)} lyric chars)"
-                )
-                return {"caption": caption, "lyrics": lyrics}
-            logger.warning("Radio LLM lyric spec missing caption or lyrics")
-            return None
-        except LyricsRejectedError:
-            raise
-        except Exception as e:
-            logger.warning(f"Radio LLM lyric spec generation failed ({model_name}): {e}")
-            return None
-
-    async def _generate_song_spec_with_sample(
-        self, station: StationResponse, fallback_caption: str
-    ) -> Optional[dict[str, str]]:
-        """Use the existing sample-generation path to produce vocal lyrics."""
-        query_parts = [station.name]
-        if station.genre:
-            query_parts.append(station.genre)
-        if station.mood:
-            query_parts.append(station.mood)
-        if fallback_caption:
-            query_parts.append(fallback_caption)
-        query = ". ".join(part for part in query_parts if part)
-
-        try:
-            sample = await generation_service.create_sample(
-                query=query,
-                instrumental=False,
-                vocal_language="en",
-                temperature=0.85,
-                allow_holders=frozenset({"radio"}),
-            )
-            if not sample.get("success", True):
-                return None
-            lyrics = str(sample.get("lyrics", "")).strip()
-            if not lyrics:
-                return None
-            caption = str(sample.get("caption", "")).strip() or fallback_caption
-            return {"caption": caption, "lyrics": lyrics}
-        except LyricsRejectedError:
-            raise
-        except Exception as e:
-            logger.warning(f"Radio sample lyric generation failed: {e}")
-            return None
-
-    def _fallback_lyrics(self, station: StationResponse, caption: str) -> str:
-        theme = station.genre or station.name or "the song"
-        mood = station.mood or "the night"
-        image = caption or station.caption_template or theme
-        return (
-            "[verse]\n"
-            f"We step into {mood}\n"
-            f"Following the sound of {theme}\n"
-            f"Every shadow starts to move\n"
-            f"Every heartbeat finds the groove\n\n"
-            "[chorus]\n"
-            f"Sing it out, {theme} in the air\n"
-            f"Lift the moment everywhere\n"
-            f"Hold the light and carry on\n"
-            f"Turn {image[:48]} into song\n\n"
-            "[bridge]\n"
-            "Let the rhythm rise again\n"
-            "Let the story never end"
-        )
-
-    async def _generate_title_with_llm(
-        self, station: StationResponse, caption: str, recent_titles: list[str]
-    ) -> Optional[str]:
-        """Generate a station-themed song title using the configured radio LLM.
-
-        Returns the generated title, or None to fall back to random titles.
-        """
-        provider, model_name, _prompt = await self._get_radio_llm()
-        if provider is None:
-            logger.info("Radio title: no LLM provider available, using random title")
-            return None
-
-        logger.info(f"Radio title: generating via {model_name}")
-        avoid_str = ""
-        if recent_titles:
-            avoid_str = (
-                "\nDo NOT reuse any of these recent titles: "
-                + ", ".join(f'"{t}"' for t in recent_titles[:10])
-            )
-
-        style_hint = ""
-        if station.genre:
-            style_hint += f"Genre: {station.genre}. "
-        if station.mood:
-            style_hint += f"Mood: {station.mood}. "
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Generate a single creative song title (1-8 words) that fits the style "
-                    "of the station and song described below. The title should evoke the "
-                    "genre and mood — it can be poetic, atmospheric, or thematic. "
-                    "Output ONLY the title, nothing else."
-                    f"{avoid_str}"
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Station: {station.name}\n{style_hint}Caption: {caption}",
-            },
-        ]
-
-        try:
-            raw = await provider.chat(
-                messages,
-                model=model_name,
-                max_tokens=50,
-                allow_holders=frozenset({"radio"}),
-            )
-            cleaned = clean_title(raw)
-            if cleaned and cleaned not in recent_titles:
-                logger.info(f"Radio LLM title generated: '{cleaned}' via {model_name}")
-                return cleaned
-        except Exception as e:
-            logger.warning(f"Radio LLM title generation failed ({model_name}): {e}")
-
-        return None
-
     async def generate_next_track(self, station_id: str) -> dict[str, Any]:
         """Generate the next track for a radio station.
 
@@ -492,8 +284,8 @@ class RadioService:
             }
 
         # Hold the GPU lock across all MLX/ACE-Step work for this radio job:
-        # caption/spec helpers, sample fallback, and music generation all use
-        # Metal on Apple Silicon and cannot overlap safely.
+        # shared spec building and music generation both use Metal on Apple
+        # Silicon and cannot overlap safely.
         acquired = await gpu_lock.await_acquire("radio")
         if not acquired:
             return {
@@ -501,66 +293,34 @@ class RadioService:
                 "error": "GPU lock timeout. Please try again.",
             }
 
-        llm_caption: str | None = None
-        llm_song_spec: dict[str, str] | None = None
-        sample_song_spec: dict[str, str] | None = None
         history_id: str | None = None
         song_title: str | None = None
         deferred_recent_titles: list[str] | None = None
         try:
-            if station.instrumental:
-                llm_caption = await self._generate_caption_with_llm(station)
-            else:
-                llm_song_spec = await self._generate_song_spec_with_llm(station)
-                if not (llm_song_spec and llm_song_spec.get("lyrics", "").strip()):
-                    provisional_caption = (
-                        (llm_song_spec or {}).get("caption", "").strip()
-                        or station.caption_template
-                        or " ".join(
-                            part for part in (station.genre, station.mood) if part
-                        )
-                        or station.name
-                    )
-                    sample_song_spec = await self._generate_song_spec_with_sample(
-                        station, provisional_caption,
-                    )
-
-            # Randomize within station ranges for variety
-            bpm = None
-            if station.bpm_min is not None and station.bpm_max is not None:
-                bpm = random.randint(station.bpm_min, station.bpm_max)
-            elif station.bpm_min is not None:
-                bpm = station.bpm_min
-
             duration = await get_default_duration()
-
-            # Build caption: prefer LLM-generated, fallback to template
-            if llm_song_spec and llm_song_spec.get("caption"):
-                caption = llm_song_spec["caption"]
-            elif llm_caption:
-                caption = llm_caption
-            else:
-                caption = station.caption_template
-                if caption and station.mood and station.genre:
-                    caption = caption.replace("{mood}", station.mood).replace(
-                        "{genre}", station.genre
-                    )
-                elif not caption:
-                    tpl_parts = []
-                    if station.genre:
-                        tpl_parts.append(station.genre)
-                    if station.mood:
-                        tpl_parts.append(f"{station.mood} mood")
-                    caption = f"A {' '.join(tpl_parts)} track" if tpl_parts else "A music track"
-
-            lyrics = ""
-            if not station.instrumental:
-                lyrics = (llm_song_spec or {}).get("lyrics", "").strip()
-                if not lyrics and sample_song_spec:
-                    caption = sample_song_spec.get("caption") or caption
-                    lyrics = sample_song_spec.get("lyrics", "").strip()
-                if not lyrics:
-                    lyrics = self._fallback_lyrics(station, caption)
+            _runtime, _model_name, radio_system_prompt = await self._get_radio_llm()
+            spec = await build_music_spec(
+                prompt=" ".join(
+                    part
+                    for part in (station.name, station.description)
+                    if part
+                ),
+                instrumental=station.instrumental,
+                genre=station.genre,
+                mood=station.mood,
+                caption_template="" if station.is_preset else station.caption_template,
+                bpm_min=station.bpm_min,
+                bpm_max=station.bpm_max,
+                keyscale=station.keyscale,
+                timesignature=station.timesignature,
+                duration=duration,
+                source="radio",
+                system_prompt=radio_system_prompt,
+                allow_holders=frozenset({"radio"}),
+            )
+            caption = str(spec.get("caption") or station.caption_template or "A music track")
+            lyrics = str(spec.get("lyrics") or "")
+            bpm = spec.get("bpm") if isinstance(spec.get("bpm"), int) else None
 
             # Parse advanced params
             advanced = {}
@@ -585,6 +345,9 @@ class RadioService:
                 params_dict["keyscale"] = station.keyscale
             if station.timesignature:
                 params_dict["timesignature"] = station.timesignature
+            for key in ("quality_profile", "spec_source", "source_prompt"):
+                if spec.get(key):
+                    params_dict[key] = spec[key]
             if generation_service.active_dit_model:
                 params_dict["dit_model"] = generation_service.active_dit_model
             if generation_service.active_lm_model:

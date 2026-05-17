@@ -6,11 +6,11 @@ from bangers.backends.ace_step_backend import AceStepBackend
 from bangers.services.generation_request_builder import normalize_generation_params
 from bangers.services.lyrics_pipeline import (
     format_song_spec,
-    generate_song_spec,
     is_lyrics_pipeline_prepared,
     prepare_generation_params,
     strip_lyrics_pipeline_internal_keys,
 )
+from bangers.services.music_specs import build_music_spec
 
 
 class GenerationService:
@@ -91,8 +91,14 @@ class GenerationService:
     async def create_sample(self, **kwargs: Any) -> dict[str, Any]:
         query = str(kwargs.pop("query", "") or "")
         kwargs.pop("vocal_language", None)
-        kwargs.pop("temperature", None)
-        return await generate_song_spec(query, **kwargs)
+        temperature = float(kwargs.pop("temperature", 0.85) or 0.85)
+        return await build_music_spec(
+            prompt=query,
+            instrumental=bool(kwargs.pop("instrumental", False)),
+            source="create",
+            temperature=temperature,
+            **kwargs,
+        )
 
     async def format_sample(self, **kwargs: Any) -> dict[str, Any]:
         return await format_song_spec(**kwargs)

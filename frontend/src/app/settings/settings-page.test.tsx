@@ -67,7 +67,6 @@ describe("SettingsPage", () => {
       settings: {
         keep_active_models_resident: "true",
         parallel_pipeline_enabled: "false",
-        fast_create_mode: "true",
         lyrics_guardrails_enabled: "true",
         default_duration: "200",
       },

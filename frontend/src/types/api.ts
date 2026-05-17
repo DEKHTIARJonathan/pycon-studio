@@ -93,6 +93,9 @@ export interface GenerateRequest {
   audio_cover_strength?: number;
   auto_title?: boolean;
   src_audio_path?: string;
+  quality_profile?: string;
+  spec_source?: string;
+  source_prompt?: string;
 }
 
 export interface GenerateResponse {
@@ -169,6 +172,9 @@ export interface SampleResponse {
   language: string;
   timesignature: string;
   instrumental: boolean;
+  quality_profile: string;
+  spec_source: string;
+  source_prompt: string;
   success: boolean;
   error: string | null;
 }

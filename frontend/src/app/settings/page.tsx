@@ -11,7 +11,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useGenerationStore } from "@/stores/generation-store";
 import { fetchHealth, fetchSettings, updateSettings } from "@/lib/api/client";
 import { fetchVaeThrottle, updateVaeThrottle, fetchDitThrottle, updateDitThrottle, resetThrottle, fetchThrottleScope, updateThrottleScope } from "@/lib/api/radio-client";
 import { Switch } from "@/components/ui/switch";
@@ -20,7 +19,6 @@ import { DURATION_DEFAULT, DURATION_MAX, DURATION_MIN } from "@/lib/constants";
 
 export default function SettingsPage() {
   const { backendUrl, setBackendUrl } = useSettingsStore();
-  const setFastCreateMode = useGenerationStore((s) => s.setFastCreateMode);
   const [urlInput, setUrlInput] = useState(backendUrl);
   const queryClient = useQueryClient();
 
@@ -309,22 +307,6 @@ export default function SettingsPage() {
                   onCheckedChange={(checked) =>
                     settingsMutation.mutate({ parallel_pipeline_enabled: checked ? "true" : "false" })
                   }
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <div className="space-y-0.5">
-                  <Label htmlFor="fast-create">Fast Create mode</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Simple mode sends your prompt directly instead of requiring LLM expansion.
-                  </p>
-                </div>
-                <Switch
-                  id="fast-create"
-                  checked={boolSetting("fast_create_mode", true)}
-                  onCheckedChange={(checked) => {
-                    setFastCreateMode(checked);
-                    settingsMutation.mutate({ fast_create_mode: checked ? "true" : "false" });
-                  }}
                 />
               </div>
               <div className="flex items-center justify-between gap-3">

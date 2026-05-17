@@ -222,9 +222,12 @@ async def test_format_when_lm_not_loaded(client):
 @pytest.mark.asyncio
 async def test_sample_when_lm_not_loaded(client):
     resp = await client.post("/api/sample", json={
-        "query": "happy pop song",
+        "query": "happy country song",
     })
     assert resp.status_code == 200
     body = resp.json()
-    assert body["success"] is False
-    assert "Chat LLM" in body["error"]
+    assert body["success"] is True
+    assert body["quality_profile"] == "Country"
+    assert body["spec_source"].endswith("fallback-lyrics")
+    assert "acoustic strumming" in body["caption"]
+    assert body["lyrics"].startswith("[verse]")

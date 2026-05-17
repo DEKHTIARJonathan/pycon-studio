@@ -67,6 +67,12 @@ class GenerateRequest(BaseModel):
     use_cot_caption: bool = Field(default=False)
     use_cot_language: bool = Field(default=True)
 
+    # Quality/spec diagnostics. These are accepted from Create/Radio/DJ,
+    # persisted in history, and ignored by ACE-Step's dataclass adapter.
+    quality_profile: str = Field(default="", max_length=200)
+    spec_source: str = Field(default="", max_length=200)
+    source_prompt: str = Field(default="", max_length=4000)
+
 
 class GenerateResponse(BaseModel):
     job_id: str
@@ -122,6 +128,9 @@ class SampleResponse(BaseModel):
     language: str = ""
     timesignature: str = ""
     instrumental: bool = False
+    quality_profile: str = ""
+    spec_source: str = ""
+    source_prompt: str = ""
     success: bool = True
     error: Optional[str] = None
 

@@ -1,5 +1,4 @@
 from bangers.config import (
-    DEFAULT_FAST_CREATE_MODE,
     DEFAULT_KEEP_ACTIVE_MODELS_RESIDENT,
     DEFAULT_LYRICS_GUARDRAILS_ENABLED,
     DEFAULT_PARALLEL_PIPELINE_ENABLED,
@@ -38,10 +37,6 @@ async def parallel_pipeline_enabled() -> bool:
         "parallel_pipeline_enabled",
         DEFAULT_PARALLEL_PIPELINE_ENABLED,
     )
-
-
-async def fast_create_mode_enabled() -> bool:
-    return await get_bool_setting("fast_create_mode", DEFAULT_FAST_CREATE_MODE)
 
 
 async def lyrics_guardrails_enabled() -> bool:

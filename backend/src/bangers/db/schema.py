@@ -122,7 +122,6 @@ from bangers.config import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_DEVICE,
     DEFAULT_DIT_SLEEP_MS,
-    DEFAULT_FAST_CREATE_MODE,
     DEFAULT_GUIDANCE_SCALE,
     DEFAULT_INFERENCE_STEPS,
     DEFAULT_KEEP_ACTIVE_MODELS_RESIDENT,
@@ -153,7 +152,6 @@ DEFAULT_SETTINGS = {
     "throttle_radio_only": "true" if DEFAULT_THROTTLE_RADIO_ONLY else "false",
     "keep_active_models_resident": "true" if DEFAULT_KEEP_ACTIVE_MODELS_RESIDENT else "false",
     "parallel_pipeline_enabled": "true" if DEFAULT_PARALLEL_PIPELINE_ENABLED else "false",
-    "fast_create_mode": "true" if DEFAULT_FAST_CREATE_MODE else "false",
     "lyrics_guardrails_enabled": "true" if DEFAULT_LYRICS_GUARDRAILS_ENABLED else "false",
 }
 

@@ -121,37 +121,6 @@ export async function runReconcilePoller(
   }
 }
 
-export function buildFastSimpleRequest({
-  simpleForm,
-  advancedSettings,
-  autoTitleEnabled,
-  customTitle,
-}: {
-  simpleForm: SimpleForm;
-  advancedSettings: AdvancedSettings;
-  autoTitleEnabled: boolean;
-  customTitle: string;
-}): GenerateRequest {
-  return {
-    task_type: "text2music",
-    caption: simpleForm.prompt,
-    lyrics: "",
-    instrumental: simpleForm.instrumental,
-    vocal_language: "en",
-    duration: advancedSettings.defaultDuration,
-    inference_steps: advancedSettings.inferenceSteps,
-    guidance_scale: advancedSettings.guidanceScale,
-    seed: advancedSettings.seed,
-    thinking: false,
-    use_cot_caption: false,
-    use_cot_metas: false,
-    use_cot_language: false,
-    batch_size: advancedSettings.batchSize,
-    audio_format: advancedSettings.audioFormat,
-    auto_title: autoTitleEnabled && !customTitle,
-  };
-}
-
 export function resolveSubmittedJobState(
   activeJobs: GenerationJob[],
   tempJobId: string,
@@ -190,7 +159,6 @@ export function useGeneration() {
     setPreFormatSnapshot,
     autoTitleEnabled,
     customTitle,
-    fastCreateMode,
   } = useGenerationStore();
 
   const activeModel = useActiveModel();
@@ -274,16 +242,7 @@ export function useGeneration() {
     try {
       let serverJobId: string;
 
-      if (activeMode === "Simple" && useGenerationStore.getState().fastCreateMode) {
-        const request = buildFastSimpleRequest({
-          simpleForm,
-          advancedSettings,
-          autoTitleEnabled,
-          customTitle,
-        });
-        const response = await submitGeneration(request);
-        serverJobId = response.job_id;
-      } else if (activeMode === "Simple") {
+      if (activeMode === "Simple") {
         // ACE-Step Simple mode: two-step create sample then auto-generate
         const sample = await createSampleApi({
           query: simpleForm.prompt,
@@ -329,6 +288,9 @@ export function useGeneration() {
           batch_size: advancedSettings.batchSize,
           audio_format: advancedSettings.audioFormat,
           auto_title: autoTitleEnabled && !customTitle,
+          quality_profile: sample.quality_profile,
+          spec_source: sample.spec_source,
+          source_prompt: sample.source_prompt || simpleForm.prompt,
         };
 
         const response = await submitGeneration(request);
@@ -379,7 +341,6 @@ export function useGeneration() {
     setIsGenerating,
     autoTitleEnabled,
     customTitle,
-    fastCreateMode,
   ]);
 
   // Register submit for auto-gen re-submit from the global WS handler

@@ -117,17 +117,17 @@ async def test_vocal_radio_station_generates_and_saves_lyrics(client, monkeypatc
     monkeypatch.setattr(radio_module, "generation_service", fake_generation)
     monkeypatch.setattr(radio_module, "gpu_lock", _FakeGpuLock())
 
-    async def lyric_spec(_station):
+    async def shared_spec(**_kwargs):
         return {
             "caption": "A vocal pop song with glittering hooks",
             "lyrics": "[verse]\nLights rise\n\n[chorus]\nWe sing tonight",
+            "instrumental": False,
+            "quality_profile": "Pop",
+            "spec_source": "test-shared-spec",
+            "source_prompt": "pop",
         }
 
-    async def title(*_args, **_kwargs):
-        return "Radio Vocal"
-
-    monkeypatch.setattr(radio_service, "_generate_song_spec_with_llm", lyric_spec)
-    monkeypatch.setattr(radio_service, "_generate_title_with_llm", title)
+    monkeypatch.setattr(radio_module, "build_music_spec", shared_spec)
 
     station = await _station(instrumental=False, vocal_language="english")
     result = await radio_service.generate_next_track(station.id)
@@ -151,6 +151,8 @@ async def test_vocal_radio_station_generates_and_saves_lyrics(client, monkeypatc
     params = json.loads(history["params_json"])
     results = json.loads(history["result_json"])
     assert params["lyrics"].startswith("[verse]")
+    assert params["quality_profile"] == "Pop"
+    assert params["spec_source"] == "test-shared-spec"
     assert results[0]["params"]["lyrics"].startswith("[verse]")
 
 
@@ -165,14 +167,17 @@ async def test_instrumental_radio_station_keeps_empty_lyrics(client, monkeypatch
     monkeypatch.setattr(radio_module, "generation_service", fake_generation)
     monkeypatch.setattr(radio_module, "gpu_lock", _FakeGpuLock())
 
-    async def no_caption(_station):
-        return None
+    async def shared_spec(**_kwargs):
+        return {
+            "caption": "A bright instrumental pop track",
+            "lyrics": "",
+            "instrumental": True,
+            "quality_profile": "Pop",
+            "spec_source": "test-shared-spec",
+            "source_prompt": "pop",
+        }
 
-    async def title(*_args, **_kwargs):
-        return "Radio Instrumental"
-
-    monkeypatch.setattr(radio_service, "_generate_caption_with_llm", no_caption)
-    monkeypatch.setattr(radio_service, "_generate_title_with_llm", title)
+    monkeypatch.setattr(radio_module, "build_music_spec", shared_spec)
 
     station = await _station(instrumental=True)
     result = await radio_service.generate_next_track(station.id)
@@ -207,11 +212,7 @@ async def test_invalid_radio_llm_json_falls_back_to_template_lyrics(client, monk
     async def bad_llm():
         return BadJsonProvider(), "bad-model", "caption guidance"
 
-    async def title(*_args, **_kwargs):
-        return "Fallback Lyrics"
-
     monkeypatch.setattr(radio_service, "_get_radio_llm", bad_llm)
-    monkeypatch.setattr(radio_service, "_generate_title_with_llm", title)
 
     station = await _station(instrumental=False)
     result = await radio_service.generate_next_track(station.id)
@@ -232,10 +233,10 @@ async def test_radio_rejected_generated_lyrics_stop_generation(client, monkeypat
     monkeypatch.setattr(radio_module, "generation_service", fake_generation)
     monkeypatch.setattr(radio_module, "gpu_lock", _FakeGpuLock())
 
-    async def rejected_spec(_station):
+    async def rejected_spec(**_kwargs):
         raise LyricsRejectedError("Generated lyrics were too unsafe.")
 
-    monkeypatch.setattr(radio_service, "_generate_song_spec_with_llm", rejected_spec)
+    monkeypatch.setattr(radio_module, "build_music_spec", rejected_spec)
 
     station = await _station(instrumental=False)
     result = await radio_service.generate_next_track(station.id)
@@ -246,7 +247,7 @@ async def test_radio_rejected_generated_lyrics_stop_generation(client, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_radio_sample_fallback_runs_under_radio_gpu_lock(client, monkeypatch):
+async def test_radio_shared_spec_runs_under_radio_gpu_lock(client, monkeypatch):
     from bangers.config import settings
     from bangers.services import deferred_titles as deferred_titles_module
     from bangers.services import radio_service as radio_module
@@ -271,16 +272,23 @@ async def test_radio_sample_fallback_runs_under_radio_gpu_lock(client, monkeypat
         lambda **_kwargs: None,
     )
 
-    async def no_llm_spec(_station):
-        return None
+    async def shared_spec(**_kwargs):
+        assert fake_lock.holder == "radio"
+        return {
+            "caption": "A sampled vocal pop song",
+            "lyrics": "[verse]\nSample lyric\n\n[chorus]\nRadio light",
+            "instrumental": False,
+            "quality_profile": "Pop",
+            "spec_source": "test-shared-spec",
+            "source_prompt": "pop",
+        }
 
-    monkeypatch.setattr(radio_service, "_generate_song_spec_with_llm", no_llm_spec)
+    monkeypatch.setattr(radio_module, "build_music_spec", shared_spec)
 
     station = await _station(instrumental=False)
     result = await radio_service.generate_next_track(station.id)
 
     assert result["success"] is True
-    assert fake_generation.sample_lock_holders == ["radio"]
     assert fake_generation.generate_lock_holders == ["radio"]
 
 

@@ -1,7 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { toast } from "sonner";
 import {
-  buildFastSimpleRequest,
   reconcilePolledStatus,
   resolveSubmittedJobState,
   runReconcilePoller,
@@ -50,43 +49,6 @@ describe("resolveSubmittedJobState", () => {
     expect(resolveSubmittedJobState([job("server", "cancelling")], "temp", "server")).toBe(
       "cancel",
     );
-  });
-});
-
-describe("buildFastSimpleRequest", () => {
-  const advancedSettings = {
-    inferenceSteps: 8,
-    guidanceScale: 7,
-    shift: 3,
-    inferMethod: "ode",
-    seed: -1,
-    thinking: true,
-    lmTemperature: 0.85,
-    batchSize: 2,
-    audioFormat: "flac",
-    defaultDuration: 200,
-    useCotCaption: false,
-    useCotMetas: true,
-    useCotLanguage: true,
-  };
-  const simpleForm = {
-    prompt: "bright synth pop",
-    instrumental: true,
-  };
-
-  it("sends Simple ACE prompts directly without LLM expansion flags", () => {
-    const request = buildFastSimpleRequest({
-      simpleForm,
-      advancedSettings,
-      autoTitleEnabled: true,
-      customTitle: "",
-    });
-
-    expect(request.caption).toBe("bright synth pop");
-    expect(request.thinking).toBe(false);
-    expect(request.use_cot_metas).toBe(false);
-    expect(request.batch_size).toBe(2);
-    expect(request.audio_format).toBe("flac");
   });
 });
 

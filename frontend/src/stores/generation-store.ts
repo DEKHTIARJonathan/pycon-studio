@@ -82,7 +82,6 @@ interface GenerationState {
   activeJobs: GenerationJob[];
   isGenerating: boolean;
   isFormatting: boolean;
-  fastCreateMode: boolean;
 
   // AutoGen
   autoGenEnabled: boolean;
@@ -107,7 +106,6 @@ interface GenerationState {
   markVariantSaved: (jobId: string, index: number) => void;
   setIsGenerating: (v: boolean) => void;
   setIsFormatting: (v: boolean) => void;
-  setFastCreateMode: (v: boolean) => void;
   setAutoGenEnabled: (v: boolean) => void;
   setAutoSaveEnabled: (v: boolean) => void;
   incrementAutoGenCount: () => void;
@@ -156,7 +154,6 @@ export const useGenerationStore = create<GenerationState>()((set) => ({
   activeJobs: [],
   isGenerating: false,
   isFormatting: false,
-  fastCreateMode: true,
 
   preFormatSnapshot: null,
 
@@ -203,7 +200,6 @@ export const useGenerationStore = create<GenerationState>()((set) => ({
 
   setIsGenerating: (v) => set({ isGenerating: v }),
   setIsFormatting: (v) => set({ isFormatting: v }),
-  setFastCreateMode: (v) => set({ fastCreateMode: v }),
   setAutoGenEnabled: (v) => set({ autoGenEnabled: v }),
   setAutoSaveEnabled: (v) => set({ autoSaveEnabled: v }),
   incrementAutoGenCount: () => set((s) => ({ autoGenCount: s.autoGenCount + 1 })),

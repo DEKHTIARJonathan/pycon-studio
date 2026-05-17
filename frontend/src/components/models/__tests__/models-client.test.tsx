@@ -66,7 +66,12 @@ describe("ModelsClient", () => {
       system_prompt: "",
       default_system_prompt: "",
     });
-    vi.mocked(fetchGpuStats).mockResolvedValue({ device: "test" });
+    vi.mocked(fetchGpuStats).mockResolvedValue({
+      device: "test",
+      vram_used_mb: null,
+      vram_total_mb: null,
+      vram_percent: null,
+    });
     vi.mocked(downloadModel).mockResolvedValue({ status: "started" });
     vi.mocked(switchChatLlmModel).mockResolvedValue({
       message: "Chat LLM loaded: Qwen3-1.7B",

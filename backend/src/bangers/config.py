@@ -19,7 +19,6 @@ DEFAULT_DIT_SLEEP_MS = 200
 DEFAULT_THROTTLE_RADIO_ONLY = True
 DEFAULT_KEEP_ACTIVE_MODELS_RESIDENT = True
 DEFAULT_PARALLEL_PIPELINE_ENABLED = False
-DEFAULT_FAST_CREATE_MODE = True
 DEFAULT_LYRICS_GUARDRAILS_ENABLED = True
 
 
@@ -155,7 +154,6 @@ class Settings:
             "thinking": _bool_string(self.DEFAULT_THINKING),
             "keep_active_models_resident": _bool_string(DEFAULT_KEEP_ACTIVE_MODELS_RESIDENT),
             "parallel_pipeline_enabled": _bool_string(DEFAULT_PARALLEL_PIPELINE_ENABLED),
-            "fast_create_mode": _bool_string(DEFAULT_FAST_CREATE_MODE),
             "lyrics_guardrails_enabled": _bool_string(DEFAULT_LYRICS_GUARDRAILS_ENABLED),
         }
 

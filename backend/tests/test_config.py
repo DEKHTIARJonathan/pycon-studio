@@ -25,7 +25,6 @@ def test_default_settings_have_empty_models():
     assert "config_profile" not in DEFAULT_SETTINGS
     assert DEFAULT_SETTINGS["keep_active_models_resident"] == "true"
     assert DEFAULT_SETTINGS["parallel_pipeline_enabled"] == "false"
-    assert DEFAULT_SETTINGS["fast_create_mode"] == "true"
     assert DEFAULT_SETTINGS["lyrics_guardrails_enabled"] == "true"
 
 
@@ -63,7 +62,6 @@ def test_db_default_overrides_does_not_seed_models(monkeypatch):
         assert "inference_steps" in defaults
         assert defaults["keep_active_models_resident"] == "true"
         assert defaults["parallel_pipeline_enabled"] == "false"
-        assert defaults["fast_create_mode"] == "true"
         assert defaults["lyrics_guardrails_enabled"] == "true"
     finally:
         _reset_settings(monkeypatch)

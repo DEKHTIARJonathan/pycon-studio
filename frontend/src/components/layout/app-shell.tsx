@@ -50,9 +50,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       ...(settings.audio_format ? { audioFormat: settings.audio_format } : {}),
       ...(settings.thinking ? { thinking: settings.thinking === "true" } : {}),
     });
-    if (settings.fast_create_mode != null) {
-      store.setFastCreateMode(settings.fast_create_mode === "true");
-    }
   }, [serverSettingsQuery.data]);
   const collapsed = useSidebarStore((s) => s.collapsed);
   const toggleMobile = useSidebarStore((s) => s.toggleMobile);
